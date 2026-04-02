@@ -88,9 +88,10 @@ W3C Trace Context가 `HTTPXClientInstrumentor`에 의해 자동 전파되어, or
 lgtm/
 ├── docker-compose.yml          # 전체 스택 (모니터링 + Agent 4개 + LoadGen)
 ├── .env                        # AOAI 인증 정보 (git 미포함)
-├── otel-config.yaml            # OTel Collector 설정
-├── prometheus.yml              # Prometheus scrape 설정
-├── tempo.yaml                  # Tempo 트레이스 저장소 설정
+├── yamls/
+│   ├── otel-config.yaml        # OTel Collector 설정
+│   ├── prometheus.yml          # Prometheus scrape 설정
+│   └── tempo.yaml              # Tempo 트레이스 저장소 설정
 ├── Makefile                    # 실행/테스트/조회 명령어
 ├── grafana/
 │   └── provisioning/

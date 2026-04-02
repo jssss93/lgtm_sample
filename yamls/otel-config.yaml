@@ -8,7 +8,7 @@ receivers:
 
 exporters:
   debug:
-    verbosity: detailed
+    verbosity: basic
 
   prometheus:
     endpoint: 0.0.0.0:8889
@@ -23,20 +23,23 @@ exporters:
 
 processors:
   batch:
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+    timeout: 5s
 
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlp/tempo, debug]
+      exporters: [otlp/tempo]
 
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [prometheus, debug]
+      exporters: [prometheus]
 
     logs:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlphttp/loki, debug]
+      exporters: [otlphttp/loki]

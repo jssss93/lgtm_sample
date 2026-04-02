@@ -8,6 +8,7 @@ services:
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning
+      - ../lgtm_volume/grafana:/var/lib/grafana
     depends_on:
       - prometheus
       - loki
@@ -19,13 +20,16 @@ services:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--web.enable-remote-write-receiver"
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./yamls/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ../lgtm_volume/prometheus:/prometheus
     ports:
       - "9090:9090"
 
   loki:
     image: grafana/loki:3.7.1
     command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ../lgtm_volume/loki:/loki
     ports:
       - "3100:3100"
 
@@ -33,7 +37,8 @@ services:
     image: grafana/tempo:2.6.1
     command: ["-config.file=/etc/tempo.yaml"]
     volumes:
-      - ./tempo.yaml:/etc/tempo.yaml
+      - ./yamls/tempo.yaml:/etc/tempo.yaml
+      - ../lgtm_volume/tempo:/tmp/tempo
     ports:
       - "3200:3200"
 
@@ -41,7 +46,7 @@ services:
     image: otel/opentelemetry-collector-contrib:0.149.0
     command: ["--config=/etc/otel-config.yaml"]
     volumes:
-      - ./otel-config.yaml:/etc/otel-config.yaml
+      - ./yamls/otel-config.yaml:/etc/otel-config.yaml
     ports:
       - "4317:4317"
       - "4318:4318"
@@ -65,11 +70,21 @@ services:
       - CODER_AGENT_URL=http://agent-coder:8000
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     depends_on:
-      - otel-collector
-      - agent-search
-      - agent-summarizer
-      - agent-coder
+      agent-search:
+        condition: service_healthy
+      agent-summarizer:
+        condition: service_healthy
+      agent-coder:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
 
   agent-search:
     build: ./agent
@@ -81,6 +96,12 @@ services:
       - AGENT_TYPE=search
     ports:
       - "8001:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     depends_on:
       - otel-collector
 
@@ -94,6 +115,12 @@ services:
       - AGENT_TYPE=summarizer
     ports:
       - "8002:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     depends_on:
       - otel-collector
 
@@ -107,6 +134,12 @@ services:
       - AGENT_TYPE=coder
     ports:
       - "8003:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     depends_on:
       - otel-collector
 
@@ -116,5 +149,8 @@ services:
     environment:
       - ORCHESTRATOR_URL=http://agent-orchestrator:8000
       - INTERVAL=8
+      - MAX_DURATION=300
     depends_on:
-      - agent-orchestrator
+      agent-orchestrator:
+        condition: service_healthy
+
