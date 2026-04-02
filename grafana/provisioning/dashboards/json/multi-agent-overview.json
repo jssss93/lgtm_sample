@@ -220,6 +220,181 @@
           "expr": "{service_name=~\"agent-.*\"}"
         }
       ]
+    },
+    {
+      "id": 13,
+      "title": "Rate Limit (429) Hits",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 36 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "increase(llm_rate_limit_count_total[5m])",
+          "legendFormat": "{{agent_type}} ({{llm_model}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "fillOpacity": 30, "lineWidth": 2, "drawStyle": "bars" },
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 14,
+      "title": "Retry Count",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 36 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "increase(llm_retry_count_total[5m])",
+          "legendFormat": "{{llm_model}} / {{reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "fillOpacity": 30, "lineWidth": 2, "drawStyle": "bars" }
+        }
+      }
+    },
+    {
+      "id": 15,
+      "title": "Cache Hit Rate (%)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 36 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "rate(cache_hit_count_total[5m]) / (rate(cache_hit_count_total[5m]) + rate(cache_miss_count_total[5m])) * 100",
+          "legendFormat": "{{agent_type}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent", "min": 0, "max": 100,
+          "custom": { "fillOpacity": 20, "lineWidth": 2 },
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 30 },
+              { "color": "green", "value": 60 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 16,
+      "title": "Cache Hit / Miss",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 44 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum(cache_hit_count_total)", "legendFormat": "Hits" },
+        { "expr": "sum(cache_miss_count_total)", "legendFormat": "Misses" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    },
+    {
+      "id": 17,
+      "title": "Total Rate Limits",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 44 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum(llm_rate_limit_count_total)" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 18,
+      "title": "Total Retries",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 44 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum(llm_retry_count_total)" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    },
+    {
+      "id": 19,
+      "title": "Cost Saved by Cache (USD)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 44 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(cache_hit_count_total) * (sum(llm_cost_usd_total) / sum(agent_run_count_total))",
+          "legendFormat": "Estimated Savings"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" } }
+    },
+    {
+      "id": 20,
+      "title": "Model Comparison — Avg Duration (A/B)",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 48 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "rate(llm_call_duration_seconds_sum[10m]) / rate(llm_call_duration_seconds_count[10m])",
+          "legendFormat": "{{llm_model}} ({{agent_type}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s" },
+        "overrides": []
+      },
+      "options": { "orientation": "horizontal", "displayMode": "gradient" }
+    },
+    {
+      "id": 21,
+      "title": "Model Comparison — Cost per Request (A/B)",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 48 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "rate(llm_cost_usd_total[10m]) / rate(agent_run_count_total[10m])",
+          "legendFormat": "{{llm_model}} ({{agent_type}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "currencyUSD" }
+      },
+      "options": { "orientation": "horizontal", "displayMode": "gradient" }
+    },
+    {
+      "id": 22,
+      "title": "Error Logs",
+      "type": "logs",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 56 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "{service_name=~\"agent-.*\"} |= \"ERROR\" or {service_name=~\"agent-.*\"} |= \"rate_limit\" or {service_name=~\"agent-.*\"} |= \"429\""
+        }
+      ]
     }
   ],
   "schemaVersion": 39
