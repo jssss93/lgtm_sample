@@ -1,4 +1,4 @@
-.PHONY: up down build restart logs status clean health stats query-traces query-logs query-metrics
+.PHONY: up down build restart logs status clean health stats test-unit query-traces query-logs query-metrics
 
 # ─── 전체 스택 (모니터링 + Agent 4개 + LoadGen) ───
 up:
@@ -45,6 +45,9 @@ test-coder:
 	@curl -s -X POST http://localhost:8003/run \
 		-H "Content-Type: application/json" \
 		-d '{"query": "Write a Python function for binary search"}' | python3 -m json.tool
+
+test-unit:
+	@cd agent && .venv/bin/python -m pytest ../tests/test_unit.py -v
 
 test-all:
 	@echo "=== Orchestrator ===" && make test-orchestrator
