@@ -55,6 +55,8 @@ agent_run_counter = meter.create_counter("agent.run.count", description="Number 
 agent_error_counter = meter.create_counter("agent.error.count", description="Number of agent errors")
 llm_call_duration = meter.create_histogram("llm.call.duration", description="LLM call duration", unit="s")
 token_usage_counter = meter.create_counter("llm.token.usage", description="Token usage")
+cost_counter = meter.create_counter("llm.cost.usd", description="LLM cost in USD")
+request_token_histogram = meter.create_histogram("llm.tokens.per_request", description="Tokens per request")
 
 # ──────────────────────────── OTel: Logs ────────────────────────
 logger_provider = LoggerProvider(resource=resource)
@@ -224,10 +226,15 @@ async def call_aoai(deployment: str, messages: list[dict], tools: list | None = 
         span.set_attribute("llm.completion_tokens", usage.completion_tokens)
         span.set_attribute("llm.total_tokens", usage.total_tokens)
         span.set_attribute("llm.duration", round(duration, 3))
+        span.set_attribute("llm.cost_usd", round(
+            usage.prompt_tokens * PRICING.get(deployment, {}).get("prompt", 0) / 1_000_000
+            + usage.completion_tokens * PRICING.get(deployment, {}).get("completion", 0) / 1_000_000, 6
+        ))
 
         llm_call_duration.record(duration, {"llm.model": deployment, "agent.type": AGENT_TYPE})
         token_usage_counter.add(usage.prompt_tokens, {"llm.model": deployment, "type": "prompt"})
         token_usage_counter.add(usage.completion_tokens, {"llm.model": deployment, "type": "completion"})
+        request_token_histogram.record(usage.total_tokens, {"llm.model": deployment, "agent.type": AGENT_TYPE})
 
         # Cost tracking
         model_pricing = PRICING.get(deployment, {"prompt": 0, "completion": 0})
@@ -235,6 +242,7 @@ async def call_aoai(deployment: str, messages: list[dict], tools: list | None = 
             usage.prompt_tokens * model_pricing["prompt"] / 1_000_000
             + usage.completion_tokens * model_pricing["completion"] / 1_000_000
         )
+        cost_counter.add(call_cost, {"llm.model": deployment, "agent.type": AGENT_TYPE})
         with _stats_lock:
             _stats["total_requests"] += 1
             _stats["total_prompt_tokens"] += usage.prompt_tokens
