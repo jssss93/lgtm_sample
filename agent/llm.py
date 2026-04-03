@@ -9,6 +9,7 @@ from openai import AsyncAzureOpenAI, RateLimitError, APIStatusError
 
 from config import (
     AGENT_TYPE, MAX_RETRIES, PROMPT_LOG_MAX_LEN, SUB_AGENT_URLS,
+    USE_DAPR, DAPR_HTTP_PORT, DAPR_APP_ID_MAP, DAPR_SECRET_STORE,
 )
 from otel_setup import (
     tracer, logger,
@@ -17,11 +18,43 @@ from otel_setup import (
 )
 from stats import calc_cost, track_llm_call, track_rate_limit, track_retry
 
+
+# ──────────────────────────── Dapr Secret Store ────────────────
+def _fetch_dapr_secret(key: str) -> dict:
+    """시작 시 Dapr Secret Store에서 시크릿을 동기적으로 가져온다."""
+    import urllib.request
+    url = f"http://localhost:{DAPR_HTTP_PORT}/v1.0/secrets/{DAPR_SECRET_STORE}/{key}"
+    try:
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            return json.loads(resp.read())
+    except Exception:
+        return {}
+
+
+def _get_aoai_credentials() -> tuple[str, str, str]:
+    """AOAI 자격증명을 Dapr Secret Store 또는 환경변수에서 가져온다."""
+    if USE_DAPR:
+        secrets = _fetch_dapr_secret("azure-openai")
+        if secrets:
+            logger.info("AOAI credentials loaded from Dapr Secret Store")
+            return (
+                secrets.get("endpoint", ""),
+                secrets.get("api-key", ""),
+                secrets.get("api-version", "2024-12-01-preview"),
+            )
+    return (
+        os.getenv("AZURE_OPENAI_ENDPOINT", ""),
+        os.getenv("AZURE_OPENAI_API_KEY", ""),
+        os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"),
+    )
+
+
 # ──────────────────────────── AOAI Client ───────────────────────
+_endpoint, _api_key, _api_version = _get_aoai_credentials()
 aoai = AsyncAzureOpenAI(
-    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT", ""),
-    api_key=os.getenv("AZURE_OPENAI_API_KEY", ""),
-    api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"),
+    azure_endpoint=_endpoint,
+    api_key=_api_key,
+    api_version=_api_version,
 )
 
 # ──────────────────────────── Shared httpx client ───────────────
@@ -140,14 +173,22 @@ async def call_aoai(deployment: str, messages: list[dict], tools: list | None = 
 async def execute_tool_call(tool_call, params: dict | None = None) -> str:
     fn_name = tool_call.function.name
     args = json.loads(tool_call.function.arguments)
-    url = SUB_AGENT_URLS.get(fn_name)
 
-    if not url:
-        return f"Error: unknown tool '{fn_name}'"
+    # Dapr Service Invocation vs 직접 HTTP 호출
+    if USE_DAPR:
+        dapr_app_id = DAPR_APP_ID_MAP.get(fn_name)
+        if not dapr_app_id:
+            return f"Error: unknown tool '{fn_name}'"
+        url = f"http://localhost:{DAPR_HTTP_PORT}/v1.0/invoke/{dapr_app_id}/method"
+    else:
+        url = SUB_AGENT_URLS.get(fn_name)
+        if not url:
+            return f"Error: unknown tool '{fn_name}'"
 
     with tracer.start_as_current_span("sub-agent-call") as span:
         span.set_attribute("sub_agent.name", fn_name)
         span.set_attribute("sub_agent.url", url)
+        span.set_attribute("sub_agent.via_dapr", USE_DAPR)
 
         try:
             client = await get_http_client()
@@ -159,7 +200,9 @@ async def execute_tool_call(tool_call, params: dict | None = None) -> str:
             resp.raise_for_status()
             result = resp.json()["result"]
             span.set_attribute("sub_agent.status", "success")
-            logger.info("Sub-agent call completed", extra={"tool": fn_name, "status": "success"})
+            logger.info("Sub-agent call completed", extra={
+                "tool": fn_name, "status": "success", "via_dapr": USE_DAPR,
+            })
             return result
         except Exception as e:
             span.set_attribute("sub_agent.status", "error")

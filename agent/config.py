@@ -59,6 +59,21 @@ PRICING = {
     "gpt-4.1-mini": {"prompt": 0.40, "completion": 1.60},
 }
 
+# ──────────────────────────── Dapr ──────────────────────────────
+USE_DAPR = os.getenv("USE_DAPR", "false").lower() == "true"
+DAPR_HTTP_PORT = int(os.getenv("DAPR_HTTP_PORT", "3500"))
+DAPR_PUBSUB_NAME = "pubsub"
+DAPR_STATE_STORE = "statestore"
+DAPR_SECRET_STORE = "secret-store"
+DAPR_TOPIC = "agent-events"
+
+# Dapr app-id 매핑 (Service Invocation용)
+DAPR_APP_ID_MAP = {
+    "call_search": "agent-search",
+    "call_summarizer": "agent-summarizer",
+    "call_coder": "agent-coder",
+}
+
 # ──────────────────────────── Sub-Agent URLs ────────────────────
 SUB_AGENT_URLS = {
     "call_search": os.getenv("SEARCH_AGENT_URL", "http://agent-search:8000"),

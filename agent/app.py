@@ -1,12 +1,12 @@
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from config import (
     AGENT_TYPE, SERVICE_NAME, AGENT_PROFILES, CACHE_TTL,
-    ORCHESTRATOR_TOOLS,
+    ORCHESTRATOR_TOOLS, USE_DAPR, DAPR_HTTP_PORT, DAPR_PUBSUB_NAME, DAPR_TOPIC,
 )
 from otel_setup import (
     tracer, logger, shutdown_providers,
@@ -18,6 +18,8 @@ from stats import (
     calc_cost, track_user_cost, track_cache_hit, track_cache_miss,
     check_quota, get_stats,
 )
+import httpx
+
 from llm import call_aoai, execute_tool_call, close_http_client
 from models import AgentRequest, AgentResponse
 
@@ -36,6 +38,46 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=f"AI Agent - {AGENT_TYPE}", lifespan=lifespan)
 FastAPIInstrumentor.instrument_app(app)
+
+
+# ──────────────────────────── Dapr Pub/Sub ─────────────────────
+async def publish_event(event_type: str, data: dict):
+    """Dapr Pub/Sub으로 agent 이벤트 발행."""
+    if not USE_DAPR:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.post(
+                f"http://localhost:{DAPR_HTTP_PORT}/v1.0/publish/{DAPR_PUBSUB_NAME}/{DAPR_TOPIC}",
+                json={"event_type": event_type, "agent_type": AGENT_TYPE, "service": SERVICE_NAME, **data},
+            )
+    except Exception as e:
+        logger.warning("Failed to publish event", extra={"error": str(e)})
+
+
+@app.get("/dapr/subscribe")
+def dapr_subscribe():
+    """Dapr가 호출하는 구독 설정 엔드포인트."""
+    if not USE_DAPR:
+        return []
+    return [{
+        "pubsubname": DAPR_PUBSUB_NAME,
+        "topic": DAPR_TOPIC,
+        "route": "/events",
+    }]
+
+
+@app.post("/events")
+async def handle_event(request: Request):
+    """Pub/Sub 이벤트 수신 핸들러. 모든 agent가 이벤트를 수신하여 로깅."""
+    event = await request.json()
+    data = event.get("data", {})
+    logger.info("Dapr event received", extra={
+        "event_type": data.get("event_type"),
+        "source_agent": data.get("agent_type"),
+        "source_service": data.get("service"),
+    })
+    return {"status": "SUCCESS"}
 
 
 # ──────────────────────────── Routes ────────────────────────────
@@ -64,9 +106,14 @@ async def run_agent(req: AgentRequest):
 
         try:
             if AGENT_TYPE == "orchestrator":
-                return await _run_orchestrator(req, span)
+                result = await _run_orchestrator(req, span)
             else:
-                return await _run_sub_agent(req, span)
+                result = await _run_sub_agent(req, span)
+            await publish_event("agent.run.completed", {
+                "model": result.model, "cost_usd": result.cost_usd,
+                "cached": result.cached, "query_preview": req.query[:100],
+            })
+            return result
         except HTTPException:
             raise
         except Exception as e:
