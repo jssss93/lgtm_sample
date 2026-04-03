@@ -1,0 +1,78 @@
+# ════════════════════════════════════════════════════════════════
+# 로컬 K8s 공통 설정 (base)
+# 이 파일 단독 사용 불가 — values-local.yaml 또는 values-local-dapr.yaml과 함께 사용
+# Usage: helm install ... -f values-local-base.yaml -f values-local.yaml
+# ════════════════════════════════════════════════════════════════
+
+agents:
+  - name: orchestrator
+    type: orchestrator
+    model: gpt-4.1
+    replicas: 1
+    port: 8000
+    resources:
+      memory: 256Mi
+      cpu: 250m
+    isOrchestrator: true
+
+  - name: search
+    type: search
+    model: gpt-4.1-mini
+    replicas: 1
+    port: 8001
+    resources:
+      memory: 128Mi
+      cpu: 100m
+
+  - name: summarizer
+    type: summarizer
+    model: gpt-4.1-mini
+    replicas: 1
+    port: 8002
+    resources:
+      memory: 128Mi
+      cpu: 100m
+
+  - name: coder
+    type: coder
+    model: gpt-4.1
+    replicas: 1
+    port: 8003
+    resources:
+      memory: 256Mi
+      cpu: 250m
+
+image:
+  repository: agent
+  tag: local
+  pullPolicy: Never
+
+azureOpenAI:
+  keyVaultName: ""
+  secretName: ""
+  secretRef: "aoai-secret"
+
+otel:
+  enabled: true
+  endpoint: "http://otel-collector.monitoring:4317"
+
+securityContext:
+  pod:
+    enabled: true
+  container:
+    enabled: true
+
+networkPolicy:
+  enabled: false
+
+pdb:
+  enabled: false
+
+affinity:
+  enabled: false
+
+topologySpreadConstraints:
+  enabled: false
+
+gracefulShutdown:
+  periodSeconds: 15

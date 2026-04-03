@@ -1,0 +1,111 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tempo-config
+  namespace: monitoring
+data:
+  tempo.yaml: |
+    stream_over_http_enabled: true
+    server:
+      http_listen_port: 3200
+    distributor:
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: "0.0.0.0:4317"
+    metrics_generator:
+      registry:
+        external_labels:
+          source: tempo
+      storage:
+        path: /tmp/tempo/generator/wal
+        remote_write:
+          - url: http://prometheus:9090/api/v1/write
+            send_exemplars: true
+    overrides:
+      defaults:
+        metrics_generator:
+          processors: [service-graphs, span-metrics, local-blocks]
+    storage:
+      trace:
+        backend: local
+        local:
+          path: /tmp/tempo
+        wal:
+          path: /tmp/tempo/wal
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tempo
+  namespace: monitoring
+  labels:
+    app: tempo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tempo
+  template:
+    metadata:
+      labels:
+        app: tempo
+    spec:
+      securityContext:
+        fsGroup: 10001
+        runAsUser: 10001
+      initContainers:
+      - name: fix-permissions
+        image: busybox:latest
+        securityContext:
+          runAsUser: 0
+        command: ["sh", "-c", "chown -R 10001:10001 /tmp/tempo"]
+        volumeMounts:
+        - name: data
+          mountPath: /tmp/tempo
+      containers:
+      - name: tempo
+        image: grafana/tempo:2.6.1
+        args: ["-config.file=/etc/tempo/tempo.yaml"]
+        ports:
+        - containerPort: 3200
+          name: http
+        - containerPort: 4317
+          name: otlp-grpc
+        volumeMounts:
+        - name: config
+          mountPath: /etc/tempo
+        - name: data
+          mountPath: /tmp/tempo
+        resources:
+          requests:
+            memory: 256Mi
+            cpu: 100m
+          limits:
+            memory: 1Gi
+            cpu: 200m
+      volumes:
+      - name: config
+        configMap:
+          name: tempo-config
+      - name: data
+        hostPath:
+          path: /Users/jongsu/git/js_project/lgtm_volume/tempo
+          type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo
+  namespace: monitoring
+spec:
+  selector:
+    app: tempo
+  ports:
+  - port: 3200
+    targetPort: 3200
+    name: http
+  - port: 4317
+    targetPort: 4317
+    name: otlp-grpc

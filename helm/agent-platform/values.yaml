@@ -94,6 +94,7 @@ resiliency:
 accessControl:
   enabled: true
   defaultAction: deny
+  trustDomain: "public"
 
 # ════════════════════════════════════════════════════════════════
 # 보안 설정

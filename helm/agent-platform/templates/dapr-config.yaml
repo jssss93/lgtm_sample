@@ -13,11 +13,11 @@ spec:
   {{- if .Values.accessControl.enabled }}
   accessControl:
     defaultAction: {{ .Values.accessControl.defaultAction }}
-    trustDomain: "agent-platform"
+    trustDomain: {{ .Values.accessControl.trustDomain | default "public" | quote }}
     policies:
     {{- range .Values.agents }}
     - appId: agent-{{ .name }}
-      trustDomain: "public"
+      trustDomain: {{ $.Values.accessControl.trustDomain | default "public" | quote }}
       namespace: {{ $.Release.Namespace }}
       {{- if .isOrchestrator }}
       defaultAction: allow

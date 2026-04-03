@@ -95,119 +95,123 @@ dapr-logs-all:
 	$(DAPR_COMPOSE) logs -f
 
 # ════════════════════════════════════════════════════════════════
-# 로컬 K8s 테스트 (minikube / kind / Docker Desktop)
+# 로컬 K8s (minikube / kind / Docker Desktop)
 # ════════════════════════════════════════════════════════════════
 
 HELM_CHART    := ./helm/agent-platform
 HELM_RELEASE  := agent-platform
 K8S_NS        := agent-platform
 MON_NS        := monitoring
+VALUES_BASE   := $(HELM_CHART)/values-local-base.yaml
 VALUES_LOCAL  := $(HELM_CHART)/values-local.yaml
 VALUES_DAPR   := $(HELM_CHART)/values-local-dapr.yaml
 
 # ─── Helm 차트 검증 (클러스터 불필요) ───
 helm-lint:
 	helm lint $(HELM_CHART)
-	helm lint $(HELM_CHART) -f $(VALUES_LOCAL)
-	helm lint $(HELM_CHART) -f $(VALUES_DAPR)
+	helm lint $(HELM_CHART) -f $(VALUES_BASE) -f $(VALUES_LOCAL)
+	helm lint $(HELM_CHART) -f $(VALUES_BASE) -f $(VALUES_DAPR)
 	@echo "✓ Helm lint 통과"
 
 helm-template:
-	helm template $(HELM_RELEASE) $(HELM_CHART) -f $(VALUES_LOCAL) --namespace $(K8S_NS)
+	helm template $(HELM_RELEASE) $(HELM_CHART) -f $(VALUES_BASE) -f $(VALUES_LOCAL) --namespace $(K8S_NS)
 
 helm-template-dapr:
-	helm template $(HELM_RELEASE) $(HELM_CHART) -f $(VALUES_DAPR) --namespace $(K8S_NS)
+	helm template $(HELM_RELEASE) $(HELM_CHART) -f $(VALUES_BASE) -f $(VALUES_DAPR) --namespace $(K8S_NS)
 
 helm-validate: helm-lint
-	@echo "--- 렌더링된 매니페스트 스키마 검증 ---"
-	helm template $(HELM_RELEASE) $(HELM_CHART) -f $(VALUES_LOCAL) --namespace $(K8S_NS) | kubectl apply --dry-run=client -f - 2>&1 || true
+	helm template $(HELM_RELEASE) $(HELM_CHART) -f $(VALUES_BASE) -f $(VALUES_LOCAL) --namespace $(K8S_NS) \
+		| kubectl apply --dry-run=client -f - 2>&1 || true
 	@echo "✓ 검증 완료"
 
-# ─── 로컬 이미지 빌드 ───
+# ─── 이미지 빌드 ───
 k8s-build:
 	docker build -t agent:local ./agent
-	@echo "✓ 이미지 빌드 완료: agent:local"
+	@echo "✓ agent:local 빌드 완료"
 
-# minikube 사용 시 이미지 로드
-k8s-build-minikube: k8s-build
-	minikube image load agent:local
-	@echo "✓ minikube에 이미지 로드 완료"
+k8s-build-grafana:
+	docker build -t grafana-custom:local ./k8s-local/grafana-plugins
+	@echo "✓ grafana-custom:local 빌드 완료"
 
-# kind 사용 시 이미지 로드
-k8s-build-kind: k8s-build
-	kind load docker-image agent:local
-	@echo "✓ kind에 이미지 로드 완료"
+k8s-build-all: k8s-build k8s-build-grafana
 
-# ─── 전체 로컬 배포 ───
+# ─── 배포 단계 ───
 k8s-setup:
 	kubectl apply -f k8s-local/namespace.yaml
-	@echo "✓ 네임스페이스 생성 완료"
+	@echo "✓ 네임스페이스"
 
-k8s-monitoring:
-	kubectl apply -f k8s-local/monitoring-stack.yaml
-	kubectl wait --for=condition=available deployment/otel-collector -n $(MON_NS) --timeout=120s
-	kubectl wait --for=condition=available deployment/prometheus -n $(MON_NS) --timeout=120s
-	kubectl wait --for=condition=available deployment/loki -n $(MON_NS) --timeout=120s
+k8s-dashboards:
+	kubectl create configmap grafana-dashboards \
+		--from-file=grafana/provisioning/dashboards/json/ \
+		-n $(MON_NS) --dry-run=client -o yaml | kubectl apply -f -
+	@echo "✓ 대시보드 ConfigMap"
+
+k8s-monitoring: k8s-dashboards
+	kubectl apply -f k8s-local/monitoring/
 	kubectl wait --for=condition=available deployment/tempo -n $(MON_NS) --timeout=120s
+	kubectl wait --for=condition=available deployment/loki -n $(MON_NS) --timeout=120s
+	kubectl wait --for=condition=available deployment/prometheus -n $(MON_NS) --timeout=120s
+	kubectl rollout restart deployment/otel-collector -n $(MON_NS)
+	kubectl wait --for=condition=available deployment/otel-collector -n $(MON_NS) --timeout=120s
 	kubectl wait --for=condition=available deployment/grafana -n $(MON_NS) --timeout=120s
-	@echo "✓ 모니터링 스택 배포 완료"
+	@echo "✓ 모니터링 스택"
 
 k8s-secret:
-	@echo "AOAI Secret 생성 (이미 존재하면 skip)"
 	@kubectl get secret aoai-secret -n $(K8S_NS) > /dev/null 2>&1 || \
+		([ -f .env ] && source .env && kubectl create secret generic aoai-secret \
+			--from-literal=api-key="$$AZURE_OPENAI_API_KEY" \
+			--from-literal=endpoint="$$AZURE_OPENAI_ENDPOINT" \
+			-n $(K8S_NS)) || \
 		kubectl apply -f k8s-local/aoai-secret.yaml
-	@echo "✓ Secret 준비 완료 (실제 값 교체 필요: kubectl edit secret aoai-secret -n $(K8S_NS))"
+	@echo "✓ AOAI Secret"
+
+k8s-grafana-plugins:
+	@for plugin in grafana-exploretraces-app grafana-lokiexplore-app grafana-metricsdrilldown-app; do \
+		curl -s -X POST "http://localhost:30300/api/plugins/$$plugin/settings" \
+			-H "Content-Type: application/json" -d '{"enabled":true}' > /dev/null 2>&1 \
+			&& echo "  ✓ $$plugin" || echo "  - $$plugin (skip)"; \
+	done
+	@echo "✓ Grafana 플러그인 활성화"
 
 k8s-deploy: k8s-setup k8s-secret
 	helm upgrade --install $(HELM_RELEASE) $(HELM_CHART) \
-		-f $(VALUES_LOCAL) \
-		--namespace $(K8S_NS) \
-		--wait --timeout 3m
+		-f $(VALUES_BASE) -f $(VALUES_LOCAL) \
+		--namespace $(K8S_NS) --wait --timeout 3m
 	@echo "✓ Agent 배포 완료"
 
 k8s-deploy-dapr: k8s-setup k8s-secret
 	kubectl apply -f k8s-local/redis.yaml
 	helm upgrade --install $(HELM_RELEASE) $(HELM_CHART) \
-		-f $(VALUES_DAPR) \
-		--namespace $(K8S_NS) \
-		--wait --timeout 3m
+		-f $(VALUES_BASE) -f $(VALUES_DAPR) \
+		--namespace $(K8S_NS) --wait --timeout 3m
 	@echo "✓ Agent (Dapr 모드) 배포 완료"
 
-k8s-up: k8s-build k8s-setup k8s-monitoring k8s-deploy
+# ─── 원스텝 배포 ───
+k8s-up: k8s-build-all k8s-setup k8s-monitoring k8s-deploy k8s-grafana-plugins
 	@echo ""
 	@echo "════════════════════════════════════════"
 	@echo "  로컬 K8s 배포 완료!"
 	@echo "  Grafana: http://localhost:30300"
-	@echo "  Port-forward: make k8s-port-forward"
+	@echo "════════════════════════════════════════"
+
+k8s-up-dapr: k8s-build-all k8s-setup k8s-monitoring k8s-deploy-dapr k8s-grafana-plugins
+	@echo ""
+	@echo "════════════════════════════════════════"
+	@echo "  로컬 K8s + Dapr 배포 완료!"
+	@echo "  Grafana: http://localhost:30300"
 	@echo "════════════════════════════════════════"
 
 # ─── 상태 확인 ───
 k8s-status:
-	@echo "=== Agent Platform ==="
-	kubectl get pods,svc -n $(K8S_NS) -l app.kubernetes.io/part-of=agent-platform
-	@echo ""
-	@echo "=== Monitoring ==="
-	kubectl get pods,svc -n $(MON_NS)
-
-k8s-health:
-	@echo "=== Agent Health Check ==="
-	@kubectl exec -n $(K8S_NS) deploy/agent-orchestrator -- \
-		curl -s http://localhost:8000/health 2>/dev/null | python3 -m json.tool || echo "orchestrator: 접근 불가"
-	@for agent in search summarizer coder; do \
-		kubectl exec -n $(K8S_NS) deploy/agent-$$agent -- \
-			curl -s http://localhost:8000/health 2>/dev/null | python3 -m json.tool || echo "$$agent: 접근 불가"; \
-	done
+	@echo "=== Agent Platform ===" && kubectl get pods,svc -n $(K8S_NS)
+	@echo "" && echo "=== Monitoring ===" && kubectl get pods,svc -n $(MON_NS)
 
 k8s-logs:
 	kubectl logs -n $(K8S_NS) -l app.kubernetes.io/part-of=agent-platform --tail=50 -f
 
-k8s-logs-agent:
-	@read -p "Agent 이름 (orchestrator/search/summarizer/coder): " AGENT; \
-	kubectl logs -n $(K8S_NS) -l app.kubernetes.io/name=agent-$$AGENT --tail=100 -f
-
-# ─── 포트 포워딩 ───
 k8s-port-forward:
-	@echo "Port forwarding 시작 (Ctrl+C로 종료)..."
+	@pkill -f "kubectl port-forward" 2>/dev/null; sleep 1
+	@echo "Port forwarding (Ctrl+C 종료)..."
 	@echo "  Orchestrator: http://localhost:8000"
 	@echo "  Grafana:      http://localhost:3000"
 	@echo "  Prometheus:   http://localhost:9090"
@@ -217,27 +221,11 @@ k8s-port-forward:
 	@wait
 
 # ─── 테스트 ───
-k8s-test:
-	@echo "=== K8s 쿼리 테스트 ==="
-	kubectl exec -n $(K8S_NS) deploy/agent-orchestrator -- \
-		curl -s -X POST http://localhost:8000/run \
-			-H "Content-Type: application/json" \
-			-d '{"query": "What is Kubernetes?"}' | python3 -m json.tool
+test-helm:
+	@./tests/test_helm_values.sh
 
-k8s-test-connectivity:
-	@echo "=== 서비스 디스커버리 & 연결 테스트 ==="
-	@for agent in orchestrator search summarizer coder; do \
-		echo -n "agent-$$agent: "; \
-		kubectl exec -n $(K8S_NS) deploy/agent-orchestrator -- \
-			curl -s -o /dev/null -w "HTTP %{http_code}" \
-			http://agent-$$agent:8000/health --max-time 5 2>/dev/null || echo "FAIL"; \
-		echo ""; \
-	done
-
-k8s-test-probes:
-	@echo "=== Probe 상태 확인 ==="
-	@kubectl get pods -n $(K8S_NS) -l app.kubernetes.io/part-of=agent-platform \
-		-o custom-columns=NAME:.metadata.name,READY:.status.conditions[?@.type==\"Ready\"].status,RESTARTS:.status.containerStatuses[0].restartCount
+test-k8s:
+	@./tests/test_k8s_smoke.sh
 
 k8s-test-rbac:
 	@echo "=== RBAC 검증 ==="
@@ -248,67 +236,33 @@ k8s-test-rbac:
 	done
 
 k8s-test-security:
-	@echo "=== SecurityContext 검증 ==="
+	@echo "=== SecurityContext ==="
 	@kubectl get pods -n $(K8S_NS) -l app.kubernetes.io/part-of=agent-platform \
-		-o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.securityContext}{"\n"}{end}'
-	@echo ""
-	@echo "=== 컨테이너 SecurityContext ==="
-	@kubectl get pods -n $(K8S_NS) -l app.kubernetes.io/part-of=agent-platform \
-		-o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[0].securityContext}{"\n"}{end}'
+		-o custom-columns='NAME:.metadata.name,NON_ROOT:.spec.securityContext.runAsNonRoot,PRIV_ESC:.spec.containers[0].securityContext.allowPrivilegeEscalation'
 
-k8s-test-rolling-update:
-	@echo "=== Rolling Update 테스트 ==="
-	@echo "1. 현재 Pod 확인"
-	kubectl get pods -n $(K8S_NS) -l app.kubernetes.io/name=agent-orchestrator -o wide
-	@echo ""
-	@echo "2. Deployment restart 실행"
-	kubectl rollout restart deployment/agent-orchestrator -n $(K8S_NS)
-	@echo ""
-	@echo "3. Rollout 상태 모니터링..."
-	kubectl rollout status deployment/agent-orchestrator -n $(K8S_NS) --timeout=120s
-	@echo ""
-	@echo "4. 새 Pod 확인"
-	kubectl get pods -n $(K8S_NS) -l app.kubernetes.io/name=agent-orchestrator -o wide
-
-# ─── 부하/장애 테스트 (사용자와 함께) ───
+# ─── 부하/장애 테스트 ───
 k8s-loadtest:
-	@echo "=== 부하 테스트 Job 실행 ==="
 	kubectl delete job loadtest -n $(K8S_NS) --ignore-not-found
 	kubectl apply -f k8s-local/loadtest-job.yaml
 	kubectl wait --for=condition=complete job/loadtest -n $(K8S_NS) --timeout=300s || true
 	kubectl logs job/loadtest -n $(K8S_NS)
 
 k8s-chaos:
-	@echo "=== 장애 복구 테스트 Job 실행 ==="
 	kubectl delete job chaos-test -n $(K8S_NS) --ignore-not-found
 	kubectl apply -f k8s-local/loadtest-job.yaml
 	kubectl wait --for=condition=complete job/chaos-test -n $(K8S_NS) --timeout=180s || true
 	kubectl logs job/chaos-test -n $(K8S_NS)
 
-k8s-test-oom:
-	@echo "=== OOMKill 시뮬레이션 (메모리 제한 축소 후 부하) ==="
-	@echo "현재 메모리 limits:"
-	@kubectl get pods -n $(K8S_NS) -l app.kubernetes.io/part-of=agent-platform \
-		-o custom-columns=NAME:.metadata.name,MEM_LIMIT:.spec.containers[0].resources.limits.memory
-
-k8s-test-drain:
-	@echo "=== Node Drain 시뮬레이션 (PDB 테스트) ==="
-	@echo "PDB 상태:"
-	kubectl get pdb -n $(K8S_NS) 2>/dev/null || echo "  PDB 없음 (replicas=1에서는 비활성화)"
-	@echo ""
-	@echo "Pod 분포:"
-	kubectl get pods -n $(K8S_NS) -l app.kubernetes.io/part-of=agent-platform -o wide
-
 # ─── 정리 ───
 k8s-down:
 	helm uninstall $(HELM_RELEASE) --namespace $(K8S_NS) || true
 	kubectl delete -f k8s-local/redis.yaml --ignore-not-found
-	kubectl delete job loadtest chaos-test -n $(K8S_NS) --ignore-not-found
-	@echo "✓ Agent 제거 완료 (모니터링 유지)"
+	@echo "✓ Agent 제거 (모니터링 유지)"
 
 k8s-clean:
 	helm uninstall $(HELM_RELEASE) --namespace $(K8S_NS) || true
-	kubectl delete -f k8s-local/monitoring-stack.yaml --ignore-not-found
+	kubectl delete -f k8s-local/monitoring/ --ignore-not-found
+	kubectl delete configmap grafana-dashboards -n $(MON_NS) --ignore-not-found
 	kubectl delete -f k8s-local/redis.yaml --ignore-not-found
 	kubectl delete namespace $(K8S_NS) $(MON_NS) --ignore-not-found
 	@echo "✓ 전체 정리 완료"
