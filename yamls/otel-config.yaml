@@ -6,12 +6,23 @@ receivers:
       http:
         endpoint: 0.0.0.0:4318
 
+  docker_stats:
+    endpoint: unix:///var/run/docker.sock
+    collection_interval: 10s
+    container_labels_to_metric_labels:
+      com.docker.compose.service: compose_service
+      com.docker.compose.project: compose_project
+    container_labels_to_resource_labels:
+      com.docker.compose.service: compose_service
+
 exporters:
   debug:
     verbosity: basic
 
   prometheus:
     endpoint: 0.0.0.0:8889
+    resource_to_telemetry_conversion:
+      enabled: true
 
   otlphttp/loki:
     endpoint: http://loki:3100/otlp
@@ -35,7 +46,7 @@ service:
       exporters: [otlp/tempo]
 
     metrics:
-      receivers: [otlp]
+      receivers: [otlp, docker_stats]
       processors: [batch]
       exporters: [prometheus]
 

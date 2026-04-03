@@ -395,6 +395,37 @@
           "expr": "{service_name=~\"agent-.*\"} |= \"ERROR\" or {service_name=~\"agent-.*\"} |= \"rate_limit\" or {service_name=~\"agent-.*\"} |= \"429\""
         }
       ]
+    },
+    {
+      "id": 23,
+      "title": "Recent Traces",
+      "type": "table",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 64 },
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "traceql",
+          "query": "{ rootServiceName =~ \"agent-.*\" }",
+          "limit": 20,
+          "tableType": "traces"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "filterable": true }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Duration" },
+            "properties": [{ "id": "unit", "value": "ms" }]
+          }
+        ]
+      }
     }
   ],
   "schemaVersion": 39
