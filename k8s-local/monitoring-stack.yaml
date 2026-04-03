@@ -28,10 +28,27 @@ data:
           enabled: true
       otlphttp/loki:
         endpoint: http://loki:3100/otlp
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+        sending_queue:
+          enabled: true
+          num_consumers: 4
+          queue_size: 100
       otlp/tempo:
         endpoint: tempo:4317
         tls:
           insecure: true
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+        sending_queue:
+          enabled: true
+          num_consumers: 4
+          queue_size: 100
+        balancer_name: round_robin
     processors:
       batch:
         send_batch_size: 1024
@@ -199,6 +216,18 @@ spec:
         app: prometheus
     spec:
       serviceAccountName: prometheus
+      securityContext:
+        fsGroup: 65534
+        runAsUser: 65534
+      initContainers:
+      - name: fix-permissions
+        image: busybox:latest
+        securityContext:
+          runAsUser: 0
+        command: ["sh", "-c", "chown -R 65534:65534 /prometheus"]
+        volumeMounts:
+        - name: data
+          mountPath: /prometheus
       containers:
       - name: prometheus
         image: prom/prometheus:v3.10.0
@@ -226,7 +255,9 @@ spec:
         configMap:
           name: prometheus-config
       - name: data
-        emptyDir: {}
+        hostPath:
+          path: /Users/jongsu/git/js_project/lgtm_volume/prometheus
+          type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: Service
@@ -259,6 +290,18 @@ spec:
       labels:
         app: loki
     spec:
+      securityContext:
+        fsGroup: 10001
+        runAsUser: 10001
+      initContainers:
+      - name: fix-permissions
+        image: busybox:latest
+        securityContext:
+          runAsUser: 0
+        command: ["sh", "-c", "chown -R 10001:10001 /loki"]
+        volumeMounts:
+        - name: data
+          mountPath: /loki
       containers:
       - name: loki
         image: grafana/loki:3.7.1
@@ -282,7 +325,9 @@ spec:
         configMap:
           name: loki-config
       - name: data
-        emptyDir: {}
+        hostPath:
+          path: /Users/jongsu/git/js_project/lgtm_volume/loki
+          type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -385,6 +430,18 @@ spec:
       labels:
         app: tempo
     spec:
+      securityContext:
+        fsGroup: 10001
+        runAsUser: 10001
+      initContainers:
+      - name: fix-permissions
+        image: busybox:latest
+        securityContext:
+          runAsUser: 0
+        command: ["sh", "-c", "chown -R 10001:10001 /tmp/tempo"]
+        volumeMounts:
+        - name: data
+          mountPath: /tmp/tempo
       containers:
       - name: tempo
         image: grafana/tempo:2.6.1
@@ -411,7 +468,9 @@ spec:
         configMap:
           name: tempo-config
       - name: data
-        emptyDir: {}
+        hostPath:
+          path: /Users/jongsu/git/js_project/lgtm_volume/tempo
+          type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: Service
@@ -524,7 +583,18 @@ spec:
       labels:
         app: grafana
     spec:
+      securityContext:
+        fsGroup: 472
+        runAsUser: 472
       initContainers:
+      - name: fix-permissions
+        image: busybox:latest
+        securityContext:
+          runAsUser: 0
+        command: ["sh", "-c", "chown -R 472:472 /var/lib/grafana"]
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/grafana
       - name: install-plugins
         image: curlimages/curl:latest
         command: ["/bin/sh", "-c"]
@@ -533,14 +603,17 @@ spec:
           set -e
           PLUGIN_DIR=/var/lib/grafana/plugins
           mkdir -p $PLUGIN_DIR
-          for PLUGIN in grafana-exploretraces-app grafana-explorelogs-app grafana-exploremetrics-app; do
+          for PLUGIN in grafana-exploretraces-app grafana-lokiexplore-app grafana-metricsdrilldown-app; do
             if [ ! -d "$PLUGIN_DIR/$PLUGIN" ]; then
               echo "Installing $PLUGIN..."
               cd /tmp
-              curl -kSL "https://grafana.com/api/plugins/$PLUGIN/versions/latest/download" -o "$PLUGIN.zip" || continue
-              unzip -qo "$PLUGIN.zip" -d $PLUGIN_DIR || continue
-              rm -f "$PLUGIN.zip"
-              echo "$PLUGIN installed"
+              curl -kSL "https://grafana.com/api/plugins/$PLUGIN/versions/latest/download" -o "$PLUGIN.zip" 2>/dev/null
+              if [ -f "$PLUGIN.zip" ] && [ -s "$PLUGIN.zip" ]; then
+                unzip -qo "$PLUGIN.zip" -d $PLUGIN_DIR 2>/dev/null && echo "  $PLUGIN installed" || echo "  unzip 실패"
+                rm -f "$PLUGIN.zip"
+              else
+                echo "  다운로드 실패, skip"
+              fi
             else
               echo "$PLUGIN already exists"
             fi
@@ -561,16 +634,8 @@ spec:
           value: "Admin"
         - name: GF_AUTH_DISABLE_LOGIN_FORM
           value: "true"
-        - name: GF_PLUGINS_PREINSTALL
-          value: "grafana-exploretraces-app,grafana-explorelogs-app,grafana-exploremetrics-app"
-        - name: GF_PLUGINS_PREINSTALL_SYNC
-          value: "true"
         - name: GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS
-          value: "grafana-exploretraces-app,grafana-explorelogs-app,grafana-exploremetrics-app"
-        - name: GF_PLUGINS_PUBLIC_KEY_RETRIEVAL_DISABLED
-          value: "true"
-        - name: GF_PLUGINS_PUBLIC_KEY_RETRIEVAL_ON_STARTUP
-          value: "false"
+          value: "grafana-exploretraces-app,grafana-lokiexplore-app,grafana-metricsdrilldown-app"
         volumeMounts:
         - name: datasources
           mountPath: /etc/grafana/provisioning/datasources
@@ -598,7 +663,9 @@ spec:
         configMap:
           name: grafana-dashboards
       - name: data
-        emptyDir: {}
+        hostPath:
+          path: /Users/jongsu/git/js_project/lgtm_volume/grafana
+          type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: Service
