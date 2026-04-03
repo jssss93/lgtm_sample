@@ -1,0 +1,39 @@
+{{- if .Values.dapr.enabled }}
+apiVersion: dapr.io/v1alpha1
+kind: Configuration
+metadata:
+  name: agent-platform-config
+spec:
+  nameResolution:
+    component: "kubernetes"
+    version: v1
+    configuration:
+      clusterDomain: "cluster.local"
+
+  {{- if .Values.accessControl.enabled }}
+  accessControl:
+    defaultAction: {{ .Values.accessControl.defaultAction }}
+    trustDomain: "agent-platform"
+    policies:
+    {{- range .Values.agents }}
+    - appId: agent-{{ .name }}
+      trustDomain: "public"
+      namespace: {{ $.Release.Namespace }}
+      {{- if .isOrchestrator }}
+      defaultAction: allow
+      {{- else }}
+      defaultAction: deny
+      operations:
+      - action: allow
+        httpVerb: ["POST"]
+        name: /run
+      - action: allow
+        httpVerb: ["POST"]
+        name: /events
+      - action: allow
+        httpVerb: ["GET"]
+        name: /health
+      {{- end }}
+    {{- end }}
+  {{- end }}
+{{- end }}

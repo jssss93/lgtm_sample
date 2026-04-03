@@ -1,0 +1,153 @@
+{{- range .Values.agents }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-{{ .name }}
+  labels:
+    {{- include "agent-platform.labels" $ | nindent 4 }}
+    {{- include "agent-platform.agentLabels" . | nindent 4 }}
+spec:
+  replicas: {{ .replicas | default 1 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-{{ .name }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-{{ .name }}
+        {{- include "agent-platform.agentLabels" . | nindent 8 }}
+      annotations:
+        {{- if $.Values.dapr.enabled }}
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "agent-{{ .name }}"
+        dapr.io/app-port: "8000"
+        dapr.io/config: "agent-platform-config"
+        dapr.io/log-level: "info"
+        {{- end }}
+    spec:
+      serviceAccountName: agent-{{ .name }}
+      terminationGracePeriodSeconds: {{ $.Values.gracefulShutdown.periodSeconds | default 30 }}
+      {{- if $.Values.securityContext.pod.enabled }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
+      {{- if and $.Values.affinity.enabled (gt (int (.replicas | default 1)) 1) }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: agent-{{ .name }}
+                topologyKey: kubernetes.io/hostname
+      {{- end }}
+      {{- if $.Values.topologySpreadConstraints.enabled }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: agent-{{ .name }}
+      {{- end }}
+      containers:
+      - name: agent
+        image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag }}"
+        imagePullPolicy: {{ $.Values.image.pullPolicy }}
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: AGENT_TYPE
+          value: "{{ .type }}"
+        - name: OTEL_SERVICE_NAME
+          value: "agent-{{ .name }}"
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "{{ $.Values.otel.endpoint }}"
+        - name: USE_DAPR
+          value: "{{ $.Values.dapr.enabled }}"
+        - name: DAPR_HTTP_PORT
+          value: "3500"
+        {{- if not $.Values.dapr.enabled }}
+        {{- range $.Values.agents }}
+        {{- if not .isOrchestrator }}
+        - name: {{ upper .type }}_AGENT_URL
+          value: "http://agent-{{ .name }}:8000"
+        {{- end }}
+        {{- end }}
+        {{- end }}
+        {{- if $.Values.azureOpenAI.secretRef }}
+        - name: AZURE_OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ $.Values.azureOpenAI.secretRef }}
+              key: api-key
+        - name: AZURE_OPENAI_ENDPOINT
+          valueFrom:
+            secretKeyRef:
+              name: {{ $.Values.azureOpenAI.secretRef }}
+              key: endpoint
+        {{- end }}
+        {{- if $.Values.securityContext.container.enabled }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+              - ALL
+        {{- end }}
+        resources:
+          requests:
+            memory: {{ .resources.memory | default "256Mi" }}
+            cpu: {{ .resources.cpu | default "250m" }}
+          limits:
+            memory: {{ .resources.memory | default "256Mi" }}
+            cpu: {{ .resources.cpu | default "500m" }}
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          failureThreshold: 12
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 0
+          periodSeconds: 15
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 0
+          periodSeconds: 10
+          failureThreshold: 3
+        {{- if $.Values.securityContext.container.enabled }}
+        volumeMounts:
+          - name: tmp
+            mountPath: /tmp
+        {{- end }}
+        lifecycle:
+          preStop:
+            exec:
+              command: ["sh", "-c", "sleep 5"]
+      {{- if $.Values.securityContext.container.enabled }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- end }}
+{{- end }}

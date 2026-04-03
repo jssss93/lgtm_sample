@@ -1,0 +1,46 @@
+{{- if .Values.dapr.enabled }}
+apiVersion: dapr.io/v1alpha1
+kind: Resiliency
+metadata:
+  name: agent-resiliency
+spec:
+  policies:
+    retries:
+      agentRetry:
+        policy: constant
+        duration: {{ .Values.resiliency.retry.duration }}
+        maxRetries: {{ .Values.resiliency.retry.maxRetries }}
+      stateRetry:
+        policy: exponential
+        maxInterval: 10s
+        maxRetries: 5
+    timeouts:
+      agentTimeout: {{ .Values.resiliency.timeout }}
+      stateTimeout: 5s
+    circuitBreakers:
+      agentCB:
+        maxRequests: {{ .Values.resiliency.circuitBreaker.maxRequests }}
+        interval: 10s
+        timeout: 30s
+        trip: {{ .Values.resiliency.circuitBreaker.trip }}
+
+  targets:
+    apps:
+    {{- range .Values.agents }}
+    {{- if not .isOrchestrator }}
+      agent-{{ .name }}:
+        retry: agentRetry
+        timeout: agentTimeout
+        circuitBreaker: agentCB
+    {{- end }}
+    {{- end }}
+    components:
+      statestore:
+        outbound:
+          retry: stateRetry
+          timeout: stateTimeout
+      pubsub:
+        outbound:
+          retry: stateRetry
+          timeout: stateTimeout
+{{- end }}

@@ -1,0 +1,113 @@
+{{- if .Values.networkPolicy.enabled }}
+# ────────────────────────────────────────────────────────────────
+# 기본 정책: 모든 에이전트 Pod에 대해 ingress deny-all
+# ────────────────────────────────────────────────────────────────
+{{- range .Values.agents }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agent-{{ .name }}-policy
+  labels:
+    {{- include "agent-platform.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: agent-{{ .name }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    {{- if .isOrchestrator }}
+    # Orchestrator: Ingress로부터의 외부 트래픽 허용
+    - from:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+      ports:
+        - port: 8000
+          protocol: TCP
+    {{- else }}
+    # Sub-agent: Orchestrator로부터만 트래픽 허용
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: agent-orchestrator
+      ports:
+        - port: 8000
+          protocol: TCP
+    {{- end }}
+    # Prometheus 스크래핑 허용
+    - from:
+        - podSelector:
+            matchLabels:
+              app: prometheus
+      ports:
+        - port: 8000
+          protocol: TCP
+  egress:
+    # DNS 허용
+    - to: []
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # OTel Collector로 텔레메트리 전송
+    - to:
+        - podSelector:
+            matchLabels:
+              app: otel-collector
+      ports:
+        - port: 4317
+          protocol: TCP
+        - port: 4318
+          protocol: TCP
+    {{- if .isOrchestrator }}
+    # Orchestrator → Sub-agent 호출
+    - to:
+      {{- range $.Values.agents }}
+      {{- if not .isOrchestrator }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: agent-{{ .name }}
+      {{- end }}
+      {{- end }}
+      ports:
+        - port: 8000
+          protocol: TCP
+    {{- end }}
+    # Azure OpenAI API 호출 (외부 HTTPS)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - port: 443
+          protocol: TCP
+    {{- if $.Values.dapr.enabled }}
+    # Dapr sidecar 통신
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: agent-{{ .name }}
+      ports:
+        - port: 3500
+          protocol: TCP
+        - port: 50001
+          protocol: TCP
+    # Redis (Dapr State Store / Pub/Sub)
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - port: 6379
+          protocol: TCP
+    {{- end }}
+{{- end }}
+{{- end }}

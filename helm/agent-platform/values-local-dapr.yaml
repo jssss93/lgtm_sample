@@ -1,0 +1,106 @@
+# ════════════════════════════════════════════════════════════════
+# 로컬 K8s + Dapr 테스트용 오버라이드
+# 사전 조건: dapr init -k
+# 사용법: helm install agent-platform ./helm/agent-platform -f helm/agent-platform/values-local-dapr.yaml
+# ════════════════════════════════════════════════════════════════
+
+agents:
+  - name: orchestrator
+    type: orchestrator
+    model: gpt-4.1
+    replicas: 1
+    port: 8000
+    resources:
+      memory: 256Mi
+      cpu: 250m
+    isOrchestrator: true
+
+  - name: search
+    type: search
+    model: gpt-4.1-mini
+    replicas: 1
+    port: 8001
+    resources:
+      memory: 128Mi
+      cpu: 100m
+
+  - name: summarizer
+    type: summarizer
+    model: gpt-4.1-mini
+    replicas: 1
+    port: 8002
+    resources:
+      memory: 128Mi
+      cpu: 100m
+
+  - name: coder
+    type: coder
+    model: gpt-4.1
+    replicas: 1
+    port: 8003
+    resources:
+      memory: 256Mi
+      cpu: 250m
+
+image:
+  repository: agent
+  tag: local
+  pullPolicy: Never
+
+# Dapr 활성화 (로컬 Redis)
+dapr:
+  enabled: true
+  stateStore: redis
+  pubsub: redis
+  secretStore: local
+
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: false
+  resources:
+    memory: 128Mi
+    cpu: 100m
+
+# K8s Secret으로 AOAI 키 주입
+azureOpenAI:
+  keyVaultName: ""
+  secretName: ""
+  secretRef: "aoai-secret"
+
+otel:
+  enabled: true
+  endpoint: "http://otel-collector.monitoring:4317"
+
+# Access Control (로컬 테스트에서는 비활성화, 추후 trustDomain 맞춘 후 활성화)
+accessControl:
+  enabled: false
+  defaultAction: deny
+
+resiliency:
+  retry:
+    maxRetries: 3
+    duration: 3s
+  timeout: 30s
+  circuitBreaker:
+    maxRequests: 5
+    trip: "consecutiveFailures > 3"
+
+securityContext:
+  pod:
+    enabled: true
+  container:
+    enabled: true
+
+networkPolicy:
+  enabled: false
+
+pdb:
+  enabled: false
+
+affinity:
+  enabled: false
+
+gracefulShutdown:
+  periodSeconds: 15

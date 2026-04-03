@@ -1,0 +1,20 @@
+{{- range .Values.agents }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-{{ .name }}
+  labels:
+    {{- include "agent-platform.labels" $ | nindent 4 }}
+    {{- include "agent-platform.agentLabels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: agent-{{ .name }}
+  ports:
+  - port: 8000
+    targetPort: 8000
+    name: http
+  {{- if .isOrchestrator }}
+  type: ClusterIP
+  {{- end }}
+{{- end }}

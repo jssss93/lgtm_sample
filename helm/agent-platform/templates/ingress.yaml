@@ -1,0 +1,26 @@
+{{- range .Values.agents }}
+{{- if .isOrchestrator }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agent-platform-ingress
+  labels:
+    {{- include "agent-platform.labels" $ | nindent 4 }}
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+spec:
+  ingressClassName: nginx
+  rules:
+  - http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: agent-{{ .name }}
+            port:
+              number: 8000
+{{- end }}
+{{- end }}

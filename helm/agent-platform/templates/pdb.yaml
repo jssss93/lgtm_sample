@@ -1,0 +1,19 @@
+{{- if .Values.pdb.enabled }}
+{{- range .Values.agents }}
+{{- if gt (int (.replicas | default 1)) 1 }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: agent-{{ .name }}-pdb
+  labels:
+    {{- include "agent-platform.labels" $ | nindent 4 }}
+    {{- include "agent-platform.agentLabels" . | nindent 4 }}
+spec:
+  minAvailable: {{ $.Values.pdb.minAvailable | default 1 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-{{ .name }}
+{{- end }}
+{{- end }}
+{{- end }}

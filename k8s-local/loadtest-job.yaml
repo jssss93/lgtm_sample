@@ -1,0 +1,189 @@
+# ════════════════════════════════════════════════════════════════
+# 부하 테스트 Job (사용자와 함께 실행)
+# kubectl apply -f k8s-local/loadtest-job.yaml
+# kubectl logs -f job/loadtest -n agent-platform
+# ════════════════════════════════════════════════════════════════
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: loadtest
+  namespace: agent-platform
+  labels:
+    app: loadtest
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app: loadtest
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: loadtest
+        image: curlimages/curl:latest
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "=== 부하 테스트 시작 ==="
+          ORCHESTRATOR="http://agent-orchestrator:8000"
+          PASSED=0
+          FAILED=0
+
+          send_query() {
+            local desc="$1"
+            local query="$2"
+            echo ""
+            echo "--- $desc ---"
+            RESULT=$(curl -s -w "\n%{http_code}" -X POST "$ORCHESTRATOR/run" \
+              -H "Content-Type: application/json" \
+              -d "{\"query\": \"$query\"}" \
+              --max-time 30)
+            HTTP_CODE=$(echo "$RESULT" | tail -1)
+            BODY=$(echo "$RESULT" | head -n -1)
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "  [PASS] HTTP $HTTP_CODE"
+              PASSED=$((PASSED + 1))
+            else
+              echo "  [FAIL] HTTP $HTTP_CODE"
+              echo "  Body: $BODY"
+              FAILED=$((FAILED + 1))
+            fi
+          }
+
+          # 헬스 체크
+          echo "=== Health Check ==="
+          for svc in orchestrator search summarizer coder; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://agent-$svc:8000/health" --max-time 5)
+            echo "  agent-$svc: HTTP $STATUS"
+          done
+
+          # 기본 쿼리 테스트
+          send_query "Search 쿼리" "What is Kubernetes?"
+          send_query "Summarize 쿼리" "Summarize: OpenTelemetry is a collection of APIs and SDKs for observability telemetry data."
+          send_query "Coder 쿼리" "Write a Python function for binary search"
+          send_query "복합 쿼리" "Search for what Docker is, then summarize the result"
+
+          # 동시 요청 (백그라운드)
+          echo ""
+          echo "=== 동시 요청 테스트 (5건) ==="
+          for i in 1 2 3 4 5; do
+            curl -s -o /dev/null -w "  Request $i: HTTP %{http_code}\n" \
+              -X POST "$ORCHESTRATOR/run" \
+              -H "Content-Type: application/json" \
+              -d "{\"query\": \"What is container $i?\"}" \
+              --max-time 30 &
+          done
+          wait
+
+          # 결과 요약
+          echo ""
+          echo "=== 결과 ==="
+          echo "  PASSED: $PASSED"
+          echo "  FAILED: $FAILED"
+
+          # Stats 확인
+          echo ""
+          echo "=== Agent Stats ==="
+          for svc in orchestrator search summarizer coder; do
+            echo "  --- $svc ---"
+            curl -s "http://agent-$svc:8000/stats" --max-time 5 | head -c 200
+            echo ""
+          done
+---
+# ════════════════════════════════════════════════════════════════
+# 장애 복구 테스트 스크립트 (CronJob이 아닌 별도 Job)
+# kubectl apply -f k8s-local/loadtest-job.yaml
+# ════════════════════════════════════════════════════════════════
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: chaos-test
+  namespace: agent-platform
+  labels:
+    app: chaos-test
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 180
+  template:
+    metadata:
+      labels:
+        app: chaos-test
+    spec:
+      restartPolicy: Never
+      serviceAccountName: chaos-test-sa
+      containers:
+      - name: chaos
+        image: bitnami/kubectl:latest
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "=== 장애 복구 테스트 ==="
+
+          echo ""
+          echo "1. 현재 Pod 상태 확인"
+          kubectl get pods -n agent-platform -l app.kubernetes.io/part-of=agent-platform
+
+          echo ""
+          echo "2. search agent Pod 강제 삭제 (복구 테스트)"
+          SEARCH_POD=$(kubectl get pods -n agent-platform -l app.kubernetes.io/name=agent-search -o name | head -1)
+          if [ -n "$SEARCH_POD" ]; then
+            echo "  삭제: $SEARCH_POD"
+            kubectl delete $SEARCH_POD -n agent-platform --grace-period=0 --force
+            echo "  30초 대기..."
+            sleep 30
+            echo "  복구 확인:"
+            kubectl get pods -n agent-platform -l app.kubernetes.io/name=agent-search
+          fi
+
+          echo ""
+          echo "3. Orchestrator 헬스 체크 (sub-agent 복구 후)"
+          for i in 1 2 3 4 5; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://agent-orchestrator:8000/health" --max-time 5)
+            echo "  시도 $i: HTTP $STATUS"
+            sleep 5
+          done
+
+          echo ""
+          echo "4. 복구 후 쿼리 테스트"
+          RESULT=$(curl -s -w "\n%{http_code}" -X POST "http://agent-orchestrator:8000/run" \
+            -H "Content-Type: application/json" \
+            -d '{"query": "What is Kubernetes?"}' \
+            --max-time 30)
+          HTTP_CODE=$(echo "$RESULT" | tail -1)
+          echo "  쿼리 결과: HTTP $HTTP_CODE"
+
+          echo ""
+          echo "5. 최종 Pod 상태"
+          kubectl get pods -n agent-platform
+---
+# Chaos test용 ServiceAccount + RBAC
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: chaos-test-sa
+  namespace: agent-platform
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: chaos-test-role
+  namespace: agent-platform
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: chaos-test-rolebinding
+  namespace: agent-platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: chaos-test-role
+subjects:
+  - kind: ServiceAccount
+    name: chaos-test-sa
+    namespace: agent-platform

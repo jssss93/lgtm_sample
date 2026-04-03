@@ -1,0 +1,11 @@
+apiVersion: v2
+name: agent-platform
+description: AI Multi-Agent Platform with Dapr + LGTM Observability
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - ai-agent
+  - dapr
+  - observability
+  - lgtm

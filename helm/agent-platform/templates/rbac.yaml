@@ -1,0 +1,53 @@
+{{- range .Values.agents }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agent-{{ .name }}
+  labels:
+    {{- include "agent-platform.labels" $ | nindent 4 }}
+    {{- include "agent-platform.agentLabels" . | nindent 4 }}
+  {{- if $.Values.image.pullSecrets }}
+imagePullSecrets:
+  {{- range $.Values.image.pullSecrets }}
+  - name: {{ . }}
+  {{- end }}
+  {{- end }}
+{{- end }}
+---
+# Agent Pod이 필요한 최소 권한만 부여
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agent-platform-role
+  labels:
+    {{- include "agent-platform.labels" . | nindent 4 }}
+rules:
+  # ConfigMap 읽기 (설정 로드)
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  # Secret 읽기 (AOAI 키 등)
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+  # 자기 Pod 상태 확인
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agent-platform-rolebinding
+  labels:
+    {{- include "agent-platform.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: agent-platform-role
+subjects:
+  {{- range .Values.agents }}
+  - kind: ServiceAccount
+    name: agent-{{ .name }}
+  {{- end }}

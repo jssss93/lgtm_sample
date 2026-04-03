@@ -1,0 +1,65 @@
+{{- if .Values.dapr.enabled }}
+---
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: statestore
+spec:
+  type: state.redis
+  version: v1
+  metadata:
+  - name: redisHost
+    value: redis-master:6379
+  - name: redisPassword
+    value: ""
+  - name: actorStateStore
+    value: "false"
+---
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: pubsub
+spec:
+  type: pubsub.redis
+  version: v1
+  metadata:
+  - name: redisHost
+    value: redis-master:6379
+  - name: redisPassword
+    value: ""
+---
+{{- if eq .Values.dapr.secretStore "azure-keyvault" }}
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: secret-store
+spec:
+  type: secretstores.azure.keyvault
+  version: v1
+  metadata:
+  - name: vaultName
+    value: {{ .Values.azureOpenAI.keyVaultName }}
+  - name: azureClientId
+    secretKeyRef:
+      name: azure-credentials
+      key: clientId
+  - name: azureTenantId
+    secretKeyRef:
+      name: azure-credentials
+      key: tenantId
+  - name: azureClientSecret
+    secretKeyRef:
+      name: azure-credentials
+      key: clientSecret
+{{- else }}
+# 로컬 테스트용: Kubernetes 기본 Secret Store 사용
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: secret-store
+spec:
+  type: secretstores.kubernetes
+  version: v1
+  metadata: []
+{{- end }}
+{{- end }}

@@ -1,0 +1,84 @@
+# ════════════════════════════════════════════════════════════════
+# 로컬 K8s 테스트용 오버라이드 (minikube / kind / Docker Desktop)
+# 사용법: helm install agent-platform ./helm/agent-platform -f helm/agent-platform/values-local.yaml
+# ════════════════════════════════════════════════════════════════
+
+agents:
+  - name: orchestrator
+    type: orchestrator
+    model: gpt-4.1
+    replicas: 1
+    port: 8000
+    resources:
+      memory: 256Mi
+      cpu: 250m
+    isOrchestrator: true
+
+  - name: search
+    type: search
+    model: gpt-4.1-mini
+    replicas: 1
+    port: 8001
+    resources:
+      memory: 128Mi
+      cpu: 100m
+
+  - name: summarizer
+    type: summarizer
+    model: gpt-4.1-mini
+    replicas: 1
+    port: 8002
+    resources:
+      memory: 128Mi
+      cpu: 100m
+
+  - name: coder
+    type: coder
+    model: gpt-4.1
+    replicas: 1
+    port: 8003
+    resources:
+      memory: 256Mi
+      cpu: 250m
+
+image:
+  repository: agent
+  tag: local
+  pullPolicy: Never
+
+# Dapr 비활성화 (로컬 단순 테스트)
+dapr:
+  enabled: false
+
+# K8s Secret으로 AOAI 키 주입
+azureOpenAI:
+  keyVaultName: ""
+  secretName: ""
+  secretRef: "aoai-secret"
+
+# 로컬 OTel Collector
+otel:
+  enabled: true
+  endpoint: "http://otel-collector.monitoring:4317"
+
+# 보안 설정 (로컬에서도 검증)
+securityContext:
+  pod:
+    enabled: true
+  container:
+    enabled: true
+
+networkPolicy:
+  enabled: false    # CNI가 없으면 false로
+
+pdb:
+  enabled: false    # 단일 replicas이므로 비활성화
+
+affinity:
+  enabled: false    # 단일 노드이므로 비활성화
+
+topologySpreadConstraints:
+  enabled: false
+
+gracefulShutdown:
+  periodSeconds: 15

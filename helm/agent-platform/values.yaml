@@ -1,0 +1,126 @@
+# ════════════════════════════════════════════════════════════════
+# Agent 개발자가 수정하는 영역
+# ════════════════════════════════════════════════════════════════
+
+# Agent 목록 — 새 agent 추가는 여기에 항목만 추가
+agents:
+  - name: orchestrator
+    type: orchestrator
+    model: gpt-4.1
+    replicas: 1
+    port: 8000
+    resources:
+      memory: 512Mi
+      cpu: 500m
+    isOrchestrator: true
+
+  - name: search
+    type: search
+    model: gpt-4.1-mini
+    replicas: 2
+    port: 8001
+    resources:
+      memory: 256Mi
+      cpu: 250m
+
+  - name: summarizer
+    type: summarizer
+    model: gpt-4.1-mini
+    replicas: 2
+    port: 8002
+    resources:
+      memory: 256Mi
+      cpu: 250m
+
+  - name: coder
+    type: coder
+    model: gpt-4.1
+    replicas: 1
+    port: 8003
+    resources:
+      memory: 512Mi
+      cpu: 500m
+
+# ════════════════════════════════════════════════════════════════
+# 플랫폼 엔지니어가 관리하는 영역
+# ════════════════════════════════════════════════════════════════
+
+image:
+  repository: myregistry.azurecr.io/agent
+  tag: latest
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+# Dapr 설정
+dapr:
+  enabled: true
+  stateStore: redis
+  pubsub: redis
+  secretStore: azure-keyvault
+
+# Redis (State Store + Pub/Sub)
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: false
+  resources:
+    memory: 256Mi
+    cpu: 250m
+
+# Azure OpenAI
+azureOpenAI:
+  keyVaultName: "your-keyvault-name"
+  secretName: "azure-openai"
+  # K8s Secret 참조 (로컬 테스트용)
+  secretRef: ""
+
+# OTel Collector
+otel:
+  enabled: true
+  endpoint: "http://otel-collector:4317"
+
+# Resiliency 정책
+resiliency:
+  retry:
+    maxRetries: 3
+    duration: 3s
+  timeout: 30s
+  circuitBreaker:
+    maxRequests: 5
+    trip: "consecutiveFailures > 3"
+
+# Access Control
+accessControl:
+  enabled: true
+  defaultAction: deny
+
+# ════════════════════════════════════════════════════════════════
+# 보안 설정
+# ════════════════════════════════════════════════════════════════
+
+securityContext:
+  pod:
+    enabled: true
+  container:
+    enabled: true
+
+networkPolicy:
+  enabled: true
+
+# ════════════════════════════════════════════════════════════════
+# 고가용성 설정
+# ════════════════════════════════════════════════════════════════
+
+pdb:
+  enabled: true
+  minAvailable: 1
+
+affinity:
+  enabled: true
+
+topologySpreadConstraints:
+  enabled: false
+
+gracefulShutdown:
+  periodSeconds: 30
