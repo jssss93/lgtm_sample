@@ -20,7 +20,12 @@ agents:
     hpa:
       enabled: false
     keda:
-      enabled: false
+      enabled: true
+      minReplicas: 1
+      maxReplicas: 3
+      targetRPS: 2
+      cooldownPeriod: 300
+      pollingInterval: 15
     isOrchestrator: true
 
   - name: search
@@ -38,7 +43,12 @@ agents:
     hpa:
       enabled: false
     keda:
-      enabled: false
+      enabled: true
+      minReplicas: 1
+      maxReplicas: 6
+      targetRPS: 2
+      cooldownPeriod: 300
+      pollingInterval: 15
 
   - name: summarizer
     type: summarizer
@@ -55,7 +65,12 @@ agents:
     hpa:
       enabled: false
     keda:
-      enabled: false
+      enabled: true
+      minReplicas: 1
+      maxReplicas: 6
+      targetRPS: 2
+      cooldownPeriod: 300
+      pollingInterval: 15
 
   - name: coder
     type: coder
@@ -72,7 +87,12 @@ agents:
     hpa:
       enabled: false
     keda:
-      enabled: false
+      enabled: true
+      minReplicas: 1
+      maxReplicas: 3
+      targetRPS: 1
+      cooldownPeriod: 300
+      pollingInterval: 15
 
 image:
   repository: agent
@@ -92,6 +112,9 @@ langfuse:
   enabled: true
   host: "http://langfuse.monitoring:3000"
   secretRef: "langfuse-secret"
+
+keda:
+  prometheusAddress: "http://prometheus.monitoring:9090"
 
 securityContext:
   pod:
