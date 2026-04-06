@@ -19,6 +19,8 @@ agents:
         cpu: 500m
     hpa:
       enabled: false
+    keda:
+      enabled: false
     isOrchestrator: true
 
   - name: search
@@ -35,6 +37,8 @@ agents:
         cpu: 200m
     hpa:
       enabled: false
+    keda:
+      enabled: false
 
   - name: summarizer
     type: summarizer
@@ -50,6 +54,8 @@ agents:
         cpu: 200m
     hpa:
       enabled: false
+    keda:
+      enabled: false
 
   - name: coder
     type: coder
@@ -64,6 +70,8 @@ agents:
         memory: 512Mi
         cpu: 500m
     hpa:
+      enabled: false
+    keda:
       enabled: false
 
 image:

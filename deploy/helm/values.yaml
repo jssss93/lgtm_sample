@@ -17,10 +17,14 @@ agents:
         memory: 1Gi
         cpu: 1000m
     hpa:
+      enabled: false
+    keda:
       enabled: true
       minReplicas: 1
       maxReplicas: 3
-      targetCPU: 70
+      targetRPS: 2
+      cooldownPeriod: 300
+      pollingInterval: 15
     isOrchestrator: true
 
   - name: search
@@ -36,10 +40,14 @@ agents:
         memory: 512Mi
         cpu: 500m
     hpa:
+      enabled: false
+    keda:
       enabled: true
-      minReplicas: 2
+      minReplicas: 1
       maxReplicas: 6
-      targetCPU: 70
+      targetRPS: 2
+      cooldownPeriod: 300
+      pollingInterval: 15
 
   - name: summarizer
     type: summarizer
@@ -54,10 +62,14 @@ agents:
         memory: 512Mi
         cpu: 500m
     hpa:
+      enabled: false
+    keda:
       enabled: true
-      minReplicas: 2
+      minReplicas: 1
       maxReplicas: 6
-      targetCPU: 70
+      targetRPS: 2
+      cooldownPeriod: 300
+      pollingInterval: 15
 
   - name: coder
     type: coder
@@ -72,10 +84,14 @@ agents:
         memory: 1Gi
         cpu: 1000m
     hpa:
+      enabled: false
+    keda:
       enabled: true
       minReplicas: 1
       maxReplicas: 3
-      targetCPU: 70
+      targetRPS: 1
+      cooldownPeriod: 300
+      pollingInterval: 15
 
 # ════════════════════════════════════════════════════════════════
 # 플랫폼 엔지니어가 관리하는 영역
@@ -167,3 +183,10 @@ topologySpreadConstraints:
 
 gracefulShutdown:
   periodSeconds: 30
+
+# ════════════════════════════════════════════════════════════════
+# KEDA 설정
+# ════════════════════════════════════════════════════════════════
+
+keda:
+  prometheusAddress: "http://prometheus.monitoring:9090"
