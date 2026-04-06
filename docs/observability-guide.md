@@ -251,13 +251,60 @@ make stats-all  # 한 줄 요약
 
 ---
 
-## 5. Grafana 대시보드 활용 팁
+## 5. Grafana 대시보드
+
+### 접속 경로
+
+| 환경 | URL |
+|------|-----|
+| Docker Compose | http://localhost:3000 |
+| K8s (NodePort) | http://localhost:30300 |
+| K8s (port-forward) | `make k8s-port-forward` → http://localhost:3000 |
+
+인증 불필요 (Anonymous Admin).
+
+### 프리셋 대시보드 (자동 프로비저닝)
+
+| 대시보드 | 내용 |
+|----------|------|
+| **Multi-Agent Overview** | Agent별 RPS, 에러율, P95 지연, 토큰 사용량, 트레이스 목록 |
+| **Cost Tracker** | 총 비용, 분당 비용, 모델별/Agent별 비용, 캐시 히트율, Rate Limit |
+| **Dapr Platform Health** | 서비스 성공률, 활성 Agent, P50/P95/P99, 에러율, 로그, 트레이스 탐색 |
+| **Container Resources** | Pod별 CPU/메모리, 노드 리소스 (K8s 전용, `pod_cpu_usage_seconds_total`) |
+
+### Drilldown (K8s 모드)
+
+K8s 배포 시 커스텀 Grafana 이미지(`grafana-custom:local`)에 드릴다운 플러그인이 포함된다.
+
+| 플러그인 | Grafana 경로 | 용도 |
+|----------|-------------|------|
+| `grafana-exploretraces-app` | /drilldown → Traces | 트레이스 탐색 (서비스별, 지연시간별 필터) |
+| `grafana-lokiexplore-app` | /drilldown → Logs | 로그 탐색 (서비스별, 패턴 분석) |
+| `grafana-metricsdrilldown-app` | /drilldown → Metrics | 메트릭 탐색 (자동 그룹핑) |
+
+폐쇄망 배포: `deploy/k8s/grafana-plugins/*.zip` 파일을 Dockerfile에서 baked-in.
+
+### 데이터소스 연동 (Traces ↔ Logs ↔ Metrics)
+
+K8s 모드에서 3개 데이터소스가 상호 연결되어 있다:
+
+```
+Tempo (traces) ──tracesToLogsV2──→ Loki (logs)
+       │                              │
+       └──tracesToMetrics──→ Prometheus ←── Loki (derivedFields → Tempo)
+```
+
+- **Tempo → Loki**: 트레이스에서 "Logs for this span" 클릭 → 해당 span의 로그 조회
+- **Tempo → Prometheus**: 트레이스에서 "Related metrics" → 해당 서비스 메트릭
+- **Loki → Tempo**: 로그의 `trace_id` 클릭 → 관련 트레이스로 점프
+- **Prometheus → Tempo**: exemplar 링크로 트레이스 연결
 
 ### Service Map (Tempo → Node Graph)
+
 Grafana → Explore → Tempo → "Service graph" 탭에서 서비스 간 호출 관계를 시각적으로 확인:
 - `agent-orchestrator` → `agent-search`, `agent-summarizer`, `agent-coder`
 
-### 추천 대시보드 패널
+### 추천 쿼리 모음
 
 | 패널 | 데이터소스 | 쿼리 |
 |------|----------|------|
@@ -265,5 +312,38 @@ Grafana → Explore → Tempo → "Service graph" 탭에서 서비스 간 호출
 | LLM P95 지연 | Prometheus | `histogram_quantile(0.95, rate(llm_call_duration_seconds_bucket[5m]))` |
 | 에러율 | Prometheus | `rate(agent_error_count_total[5m]) / rate(agent_run_count_total[5m])` |
 | 토큰 사용률 | Prometheus | `rate(llm_token_usage_total[5m])` |
+| Pod CPU (K8s) | Prometheus | `rate(pod_cpu_usage_seconds_total{namespace="agent-platform"}[2m]) * 1000` |
+| Pod 메모리 (K8s) | Prometheus | `pod_memory_working_set_bytes{namespace="agent-platform"} / 1024 / 1024` |
 | 최근 에러 로그 | Loki | `{service_name=~"agent-.*"} \|= "ERROR"` |
-| 트레이스 검색 | Tempo | `{ resource.service.name =~ "agent-.*" }` |
+| 트레이스 검색 | Tempo | `{ rootServiceName =~ "agent-.*" }` |
+| 느린 트레이스 | Tempo | `{ rootServiceName =~ "agent-.*" && duration > 5s }` |
+
+---
+
+## 6. K8s 환경 관측성 참고
+
+### OTel Collector 안정성
+
+OTel Collector → Tempo/Loki 연결이 끊기면 `retry_on_failure` + `sending_queue`로 자동 복구:
+- 재시도: 5초 간격, 최대 30초
+- 큐: 100건 버퍼링
+
+Makefile의 `k8s-monitoring` 타겟에서 백엔드(Tempo/Loki/Prometheus) Ready 확인 후 OTel Collector를 재시작하여 DNS 캐시 문제를 방지한다.
+
+### 모니터링 볼륨 영속화
+
+K8s 로컬 환경에서 hostPath로 데이터 영속화:
+
+| 컴포넌트 | hostPath |
+|----------|----------|
+| Prometheus | `lgtm_volume/prometheus` |
+| Loki | `lgtm_volume/loki` |
+| Tempo | `lgtm_volume/tempo` |
+| Grafana | `lgtm_volume/grafana` |
+
+### 테스트 스크립트
+
+```bash
+make test-helm    # Helm 차트 검증 (18 checks, 클러스터 불필요)
+make test-k8s     # K8s E2E 스모크 테스트 (29 checks)
+```
