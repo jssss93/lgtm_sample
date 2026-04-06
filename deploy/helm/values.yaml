@@ -16,6 +16,11 @@ agents:
       limits:
         memory: 1Gi
         cpu: 1000m
+    hpa:
+      enabled: true
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPU: 70
     isOrchestrator: true
 
   - name: search
@@ -30,6 +35,11 @@ agents:
       limits:
         memory: 512Mi
         cpu: 500m
+    hpa:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 6
+      targetCPU: 70
 
   - name: summarizer
     type: summarizer
@@ -43,6 +53,11 @@ agents:
       limits:
         memory: 512Mi
         cpu: 500m
+    hpa:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 6
+      targetCPU: 70
 
   - name: coder
     type: coder
@@ -56,6 +71,11 @@ agents:
       limits:
         memory: 1Gi
         cpu: 1000m
+    hpa:
+      enabled: true
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPU: 70
 
 # ════════════════════════════════════════════════════════════════
 # 플랫폼 엔지니어가 관리하는 영역
