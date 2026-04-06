@@ -1,34 +1,30 @@
-import asyncio
+"""
+FastAPI 애플리케이션 — HTTP 계층만 담당한다.
+
+비즈니스 로직은 application/use_cases.py에 있으며,
+container.py가 모든 의존성을 조립해 use_case를 주입한다.
+"""
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-from config import (
-    AGENT_TYPE, SERVICE_NAME, AGENT_PROFILES, CACHE_TTL,
-    ORCHESTRATOR_TOOLS, USE_DAPR, DAPR_HTTP_PORT, DAPR_PUBSUB_NAME, DAPR_TOPIC,
-)
-from otel_setup import (
-    tracer, logger, shutdown_providers,
-    agent_run_counter, agent_error_counter,
-    cache_hit_counter, cache_miss_counter, quota_reject_counter,
-)
-from cache import cache_get, cache_set, cache_clear, cache_size
-from stats import (
-    calc_cost, track_user_cost, track_cache_hit, track_cache_miss,
-    check_quota, get_stats,
-)
-import httpx
-
-from llm import call_aoai, execute_tool_call, close_http_client
+from application.use_cases import QuotaExceededError
+from config import AGENT_TYPE, SERVICE_NAME, CACHE_TTL, USE_DAPR, DAPR_HTTP_PORT, DAPR_PUBSUB_NAME, DAPR_TOPIC
+from container import build_use_case
+from infrastructure.sub_agent_invoker import close_http_client
 from models import AgentRequest, AgentResponse
+from otel_setup import logger, shutdown_providers
+from stats import get_stats
 
-profile = AGENT_PROFILES.get(AGENT_TYPE, AGENT_PROFILES["search"])
+# ──────────────────────────── 앱 시작 시 UseCase 조립 ───────────
+_use_case = None
 
 
-# ──────────────────────────── Lifespan (Graceful Shutdown) ──────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _use_case
+    _use_case = build_use_case()
     logger.info("Agent starting", extra={"agent_type": AGENT_TYPE, "service": SERVICE_NAME})
     yield
     logger.info("Agent shutting down", extra={"agent_type": AGENT_TYPE})
@@ -45,35 +41,15 @@ FastAPIInstrumentor.instrument_app(app)
 
 
 # ──────────────────────────── Dapr Pub/Sub ─────────────────────
-async def publish_event(event_type: str, data: dict):
-    """Dapr Pub/Sub으로 agent 이벤트 발행."""
-    if not USE_DAPR:
-        return
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            await client.post(
-                f"http://localhost:{DAPR_HTTP_PORT}/v1.0/publish/{DAPR_PUBSUB_NAME}/{DAPR_TOPIC}",
-                json={"event_type": event_type, "agent_type": AGENT_TYPE, "service": SERVICE_NAME, **data},
-            )
-    except Exception as e:
-        logger.warning("Failed to publish event", extra={"error": str(e)})
-
-
 @app.get("/dapr/subscribe")
 def dapr_subscribe():
-    """Dapr가 호출하는 구독 설정 엔드포인트."""
     if not USE_DAPR:
         return []
-    return [{
-        "pubsubname": DAPR_PUBSUB_NAME,
-        "topic": DAPR_TOPIC,
-        "route": "/events",
-    }]
+    return [{"pubsubname": DAPR_PUBSUB_NAME, "topic": DAPR_TOPIC, "route": "/events"}]
 
 
 @app.post("/events")
 async def handle_event(request: Request):
-    """Pub/Sub 이벤트 수신 핸들러. 모든 agent가 이벤트를 수신하여 로깅."""
     event = await request.json()
     data = event.get("data", {})
     logger.info("Dapr event received", extra={
@@ -84,149 +60,21 @@ async def handle_event(request: Request):
     return {"status": "SUCCESS"}
 
 
-# ──────────────────────────── Routes ────────────────────────────
+# ──────────────────────────── 핵심 엔드포인트 ───────────────────
 @app.post("/run")
-async def run_agent(req: AgentRequest):
-    with tracer.start_as_current_span("agent-run") as span:
-        span.set_attribute("agent.type", AGENT_TYPE)
-        span.set_attribute("request.query", req.query[:200])
-        if req.params:
-            for k, v in req.params.items():
-                span.set_attribute(f"param.{k}", v)
-        if req.model_override:
-            span.set_attribute("llm.model_override", req.model_override)
-        agent_run_counter.add(1, {"agent.type": AGENT_TYPE})
-        logger.info("Agent run started", extra={
-            "agent_type": AGENT_TYPE, "query": req.query[:100], "params": req.params,
-        })
-
-        # Quota 확인
-        quota_error = await check_quota(req.params)
-        if quota_error:
-            quota_reject_counter.add(1, {"agent.type": AGENT_TYPE})
-            span.set_attribute("quota.rejected", True)
-            logger.warning("Quota exceeded", extra={"agent_type": AGENT_TYPE, "reason": quota_error})
-            raise HTTPException(status_code=429, detail=quota_error)
-
-        try:
-            if AGENT_TYPE == "orchestrator":
-                result = await _run_orchestrator(req, span)
-            else:
-                result = await _run_sub_agent(req, span)
-            await publish_event("agent.run.completed", {
-                "model": result.model, "cost_usd": result.cost_usd,
-                "cached": result.cached, "query_preview": req.query[:100],
-            })
-            return result
-        except HTTPException:
-            raise
-        except Exception as e:
-            span.set_attribute("error", True)
-            agent_error_counter.add(1, {"agent.type": AGENT_TYPE, "error.type": type(e).__name__})
-            logger.error("Agent run failed", extra={"agent_type": AGENT_TYPE, "error": str(e)})
-            raise HTTPException(status_code=500, detail="Internal server error")
+async def run_agent(req: AgentRequest) -> AgentResponse:
+    try:
+        return await _use_case.execute(req)
+    except QuotaExceededError as e:
+        raise HTTPException(status_code=429, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Agent run failed", extra={"agent_type": AGENT_TYPE, "error": str(e)})
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
-async def _run_orchestrator(req: AgentRequest, span) -> AgentResponse:
-    deployment = req.model_override or profile["deployment"]
-    messages = [
-        {"role": "system", "content": profile["system_prompt"]},
-    ]
-    # context 필드 활용
-    if req.context:
-        messages.append({"role": "user", "content": f"Context:\n{req.context}"})
-    messages.append({"role": "user", "content": req.query})
-
-    response, retries1 = await call_aoai(deployment, messages, tools=ORCHESTRATOR_TOOLS)
-    choice = response.choices[0]
-
-    if not choice.message.tool_calls:
-        p, c = response.usage.prompt_tokens, response.usage.completion_tokens
-        cost = calc_cost(deployment, p, c)
-        await track_user_cost(req.params, cost, p + c)
-        return AgentResponse(
-            agent_type="orchestrator", model=deployment,
-            result=choice.message.content or "",
-            tokens={"prompt": p, "completion": c},
-            cost_usd=cost, retries=retries1,
-        )
-
-    messages.append(choice.message.model_dump())
-
-    # Sub-agent 호출을 병렬로 실행
-    tool_calls = choice.message.tool_calls
-    results = await asyncio.gather(
-        *[execute_tool_call(tc, params=req.params) for tc in tool_calls]
-    )
-    agents_called = []
-    for tc, result in zip(tool_calls, results):
-        agents_called.append(tc.function.name)
-        messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
-
-    span.set_attribute("orchestrator.agents_called", ",".join(agents_called))
-
-    final, retries2 = await call_aoai(deployment, messages)
-    total_p = response.usage.prompt_tokens + final.usage.prompt_tokens
-    total_c = response.usage.completion_tokens + final.usage.completion_tokens
-    cost = calc_cost(deployment, total_p, total_c)
-    await track_user_cost(req.params, cost, total_p + total_c)
-    return AgentResponse(
-        agent_type="orchestrator", model=deployment,
-        result=final.choices[0].message.content or "",
-        tokens={"prompt": total_p, "completion": total_c},
-        cost_usd=cost, retries=retries1 + retries2,
-    )
-
-
-async def _run_sub_agent(req: AgentRequest, span) -> AgentResponse:
-    deployment = req.model_override or profile["deployment"]
-
-    # Cache 확인
-    cached = await cache_get(deployment, req.query)
-    if cached:
-        result_text, meta = cached
-        cache_hit_counter.add(1, {"agent.type": AGENT_TYPE})
-        await track_cache_hit()
-        span.set_attribute("cache.hit", True)
-        span.set_attribute("cache.original_cost_usd", meta.get("cost_usd", 0))
-        logger.info("Cache hit", extra={"agent_type": AGENT_TYPE, "query": req.query[:80]})
-        await track_user_cost(req.params, 0, 0)
-        return AgentResponse(
-            agent_type=AGENT_TYPE, model=deployment,
-            result=result_text,
-            tokens=meta.get("tokens"), cost_usd=0.0, cached=True,
-        )
-
-    cache_miss_counter.add(1, {"agent.type": AGENT_TYPE})
-    await track_cache_miss()
-    span.set_attribute("cache.hit", False)
-
-    messages = [
-        {"role": "system", "content": profile["system_prompt"]},
-    ]
-    if req.context:
-        messages.append({"role": "user", "content": f"Context:\n{req.context}"})
-    messages.append({"role": "user", "content": req.query})
-
-    response, retries = await call_aoai(deployment, messages)
-    p, c = response.usage.prompt_tokens, response.usage.completion_tokens
-    cost = calc_cost(deployment, p, c)
-    result_text = response.choices[0].message.content or ""
-
-    # Cache 저장
-    await cache_set(deployment, req.query, result_text, {
-        "tokens": {"prompt": p, "completion": c}, "cost_usd": cost,
-    })
-
-    await track_user_cost(req.params, cost, p + c)
-    return AgentResponse(
-        agent_type=AGENT_TYPE, model=deployment,
-        result=result_text,
-        tokens={"prompt": p, "completion": c},
-        cost_usd=cost, retries=retries,
-    )
-
-
+# ──────────────────────────── 보조 엔드포인트 ───────────────────
 @app.get("/health")
 def health():
     return {"status": "ok", "agent_type": AGENT_TYPE, "service": SERVICE_NAME}
@@ -234,6 +82,7 @@ def health():
 
 @app.get("/stats")
 async def stats():
+    from cache import cache_size
     size = await cache_size()
     data = await get_stats(cache_size=size, cache_ttl=CACHE_TTL)
     return {"agent_type": AGENT_TYPE, "service": SERVICE_NAME, **data}
@@ -241,5 +90,6 @@ async def stats():
 
 @app.post("/cache/clear")
 async def clear_cache():
+    from cache import cache_clear
     count = await cache_clear()
     return {"cleared": count}
