@@ -7,14 +7,36 @@ Azure OpenAI 기반 멀티에이전트 시스템 + LGTM 관측성 스택.
 
 ## Directory Map
 
-### `agent/` — 에이전트 앱 코드 (Python FastAPI)
-- `app.py` — FastAPI 엔드포인트 (/run, /health, /stats, /events)
-- `config.py` — 에이전트 프로필, 모델 설정, Dapr 설정, 가격표
-- `llm.py` — Azure OpenAI 호출, sub-agent 호출 (HTTP/Dapr), 재시도 로직
-- `cache.py` — 인메모리 LRU / Dapr State Store 듀얼 모드 캐시
-- `otel_setup.py` — OpenTelemetry SDK 초기화 (traces, metrics, logs)
-- `models.py` — AgentRequest/AgentResponse Pydantic 모델
-- `stats.py` — 비용 추적, 쿼터 관리
+### `agent/` — 에이전트 앱 코드 (Python FastAPI, Clean Architecture)
+
+**도메인 레이어** — 외부 의존 없는 순수 정책
+- `domain/ports.py` — `CacheBackend`, `LLMProvider`, `MetricsRecorder`, `EventPublisher` 인터페이스(ABC)
+- `domain/value_objects.py` — `LLMTokens`, `CachedResult`, `UserQuota` (불변 값 객체)
+
+**애플리케이션 레이어** — 비즈니스 흐름 조율, 포트만 의존
+- `application/use_cases.py` — `SubAgentUseCase` (캐시→LLM→저장), `OrchestratorUseCase` (routing→병렬 호출→합성)
+
+**인프라 레이어** — 포트 구현체, 외부 서비스 연결
+- `infrastructure/cache_memory.py` — `MemoryCacheBackend` (OrderedDict LRU + TTL)
+- `infrastructure/cache_dapr.py` — `DaprCacheBackend` (Redis via Dapr State Store)
+- `infrastructure/llm_aoai.py` — `AzureOpenAIProvider` (Circuit Breaker + Exponential Backoff)
+- `infrastructure/metrics_otel.py` — `OTelMetricsRecorder`, `NoOpMetricsRecorder` (테스트용)
+- `infrastructure/events.py` — `DaprEventPublisher`, `NoOpEventPublisher`
+- `infrastructure/sub_agent_invoker.py` — `SubAgentInvoker` (HTTP 직접 / Dapr Service Invocation)
+
+**조립 & HTTP 레이어**
+- `container.py` — DI 조립. `build_use_case()` 한 번 호출로 모든 의존성 주입
+- `app.py` — FastAPI thin layer. 엔드포인트 (/run, /health, /stats, /cache/clear, /events) + 예외 → HTTP 변환만 담당
+
+**하위호환 퍼사드** (기존 import 유지)
+- `cache.py` — `cache_get/set/clear/size` → 백엔드에 위임
+- `llm.py` — `call_aoai`, `execute_tool_call` → `AzureOpenAIProvider`에 위임
+
+**변경 없음**
+- `config.py` — 환경변수, 에이전트 프로필, 가격표(`PRICING`), Dapr 설정
+- `models.py` — `AgentRequest`, `AgentResponse` Pydantic 스키마
+- `stats.py` — 인메모리 비용 추적, 쿼터 관리
+- `otel_setup.py` — OTel SDK 초기화 (Tracer, Meter, Logger, HTTPXInstrumentor)
 - `Dockerfile` — python:3.12-slim, non-root user
 
 ### `agent-template/` — 새 Agent 스캐폴딩 (Cookiecutter)
@@ -50,7 +72,7 @@ Azure OpenAI 기반 멀티에이전트 시스템 + LGTM 관측성 스택.
 - `provisioning/alerting/alerts.yaml` — 알림 규칙
 
 ### `tests/` — 테스트
-- `test_unit.py` — 단위 테스트 15개
+- `test_unit.py` — 단위 테스트 24개 (도메인·인프라 계층 직접 검증)
 - `test_agents.py` — 에이전트 통합 테스트
 - `test_helm_values.sh` — Helm 차트 검증 (18 checks, 클러스터 불필요)
 - `test_k8s_smoke.sh` — K8s E2E 스모크 테스트 (29 checks)
@@ -83,6 +105,7 @@ make test-k8s            # K8s E2E 스모크 테스트
 ## Tech Stack
 
 - **App**: Python 3.12, FastAPI, Azure OpenAI (gpt-4.1 / gpt-4.1-mini)
+- **Architecture**: Hexagonal (Ports & Adapters) — domain / application / infrastructure / container 4-layer
 - **Observability**: OpenTelemetry SDK → OTel Collector → Prometheus + Loki + Tempo → Grafana 12.4.2
 - **Dapr**: 1.17.3 (Service Invocation, State Store, Pub/Sub, Secret Store, Resiliency)
 - **K8s**: Helm Chart + RBAC + SecurityContext + PDB + NetworkPolicy
@@ -93,3 +116,4 @@ make test-k8s            # K8s E2E 스모크 테스트
 - K8s 모니터링 배포 순서: 백엔드(Tempo/Loki/Prometheus) Ready → OTel Collector restart → Grafana
 - 에이전트 이미지: `agent:local`, Grafana 이미지: `grafana-custom:local` (플러그인 baked-in)
 - hostPath 볼륨: `../lgtm_volume/` (prometheus, loki, tempo, grafana)
+- 새 에이전트 추가 시: `container.py`의 `build_use_case()`에 분기 추가 또는 `agent-template/` Cookiecutter 사용
