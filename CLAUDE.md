@@ -51,20 +51,20 @@ Azure OpenAI 기반 멀티에이전트 시스템 + LGTM 관측성 스택.
 
 #### `deploy/helm/` — Kubernetes Helm Chart
 - `Chart.yaml` — chart 메타 (agent-platform v0.1.0)
-- `values.yaml` — 프로덕션 기본값 (agents 4개, 보안, HA 설정)
-- `values-local-base.yaml` — 로컬 공통 (agents, image:local, security)
+- `values.yaml` — 프로덕션 기본값 (agents 4개, 보안, HA, KEDA 설정)
+- `values-local-base.yaml` — 로컬 공통 (agents, image:local, KEDA 활성화)
 - `values-local.yaml` — Dapr 없이 (base 위에 오버라이드)
 - `values-local-dapr.yaml` — Dapr 포함 (base 위에 오버라이드)
-- `templates/` — Deployment, Service, RBAC, NetworkPolicy, PDB, Ingress, Dapr CRDs
+- `templates/` — Deployment, Service, RBAC, NetworkPolicy, PDB, Ingress, HPA, KEDA ScaledObject, Dapr CRDs
 
 #### `deploy/k8s/` — 로컬 K8s 인프라 매니페스트
-- `namespace.yaml` — agent-platform + monitoring NS
+- `namespace.yaml` — agent-platform(dapr.io/enabled 레이블 포함) + monitoring NS
 - `aoai-secret.yaml` — AOAI Secret 템플릿
 - `redis.yaml` — Dapr 모드용 Redis
 - `loadtest-job.yaml` — 부하/장애 테스트 Job + Chaos RBAC
 - `metrics-server.yaml` — Docker Desktop용 metrics-server 패치
 - `monitoring/` — LGTM 스택 (otel-collector, prometheus, loki, tempo, grafana 각 분리)
-- `grafana-plugins/` — Dockerfile + 드릴다운 플러그인 zip 3개 (폐쇄망용)
+- `grafana-plugins/` — Dockerfile + 드릴다운 플러그인 zip 3개 + 추출본 plugins/ (폐쇄망용)
 
 ### `grafana/` — Grafana 프로비저닝 (Compose + K8s 공용)
 - `provisioning/datasources/datasources.yaml` — Prometheus, Loki, Tempo 설정
@@ -108,7 +108,8 @@ make test-k8s            # K8s E2E 스모크 테스트
 - **Architecture**: Hexagonal (Ports & Adapters) — domain / application / infrastructure / container 4-layer
 - **Observability**: OpenTelemetry SDK → OTel Collector → Prometheus + Loki + Tempo → Grafana 12.4.2
 - **Dapr**: 1.17.3 (Service Invocation, State Store, Pub/Sub, Secret Store, Resiliency)
-- **K8s**: Helm Chart + RBAC + SecurityContext + PDB + NetworkPolicy
+- **K8s**: Helm Chart + RBAC + SecurityContext + PDB + NetworkPolicy + KEDA (Prometheus 기반 오토스케일)
+- **AutoScaling**: KEDA 2.x — agent별 ScaledObject, Prometheus `agent_run_count_total` RPS 트리거, minReplicas=1
 
 ## Conventions
 

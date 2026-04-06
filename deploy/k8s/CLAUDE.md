@@ -26,12 +26,15 @@ Helm Chart에 포함되지 않는 인프라 리소스. `kubectl apply -f` 또는
 
 | 파일 | 역할 |
 |------|------|
-| `Dockerfile` | Alpine 기반 Grafana 12.4.2 + unzip + 플러그인 3개 설치 |
-| `grafana-exploretraces-app.zip` | Traces Drilldown (4.6MB) |
-| `grafana-lokiexplore-app.zip` | Logs Drilldown (8.7MB) |
-| `grafana-metricsdrilldown-app.zip` | Metrics Drilldown (4.0MB) |
+| `Dockerfile` | Grafana 12.4.2 기반. `plugins/` 디렉토리를 직접 COPY하여 설치 |
+| `grafana-exploretraces-app.zip` | Traces Drilldown 원본 zip (4.6MB) |
+| `grafana-lokiexplore-app.zip` | Logs Drilldown 원본 zip (8.7MB) |
+| `grafana-metricsdrilldown-app.zip` | Metrics Drilldown 원본 zip (4.0MB) |
+| `plugins/` | zip 추출본 3개 (git 관리, Docker COPY 대상) |
 
 빌드: `docker build -t grafana-custom:local ./deploy/k8s/grafana-plugins`
+
+> `GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS`에 3개 플러그인 명시됨 (`grafana.yaml`)
 
 ## hostPath 볼륨 (영속화)
 
