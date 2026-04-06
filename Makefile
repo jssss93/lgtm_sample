@@ -149,6 +149,12 @@ k8s-secret:
 			-n $(K8S_NS)) || \
 		kubectl apply -f deploy/k8s/aoai-secret.yaml
 	@echo "✓ AOAI Secret"
+	@kubectl get secret langfuse-secret -n $(K8S_NS) > /dev/null 2>&1 || \
+		kubectl create secret generic langfuse-secret \
+			--from-literal=public-key="pk-lf-local-dev-auto-init-key" \
+			--from-literal=secret-key="sk-lf-local-dev-auto-init-key" \
+			-n $(K8S_NS)
+	@echo "✓ Langfuse Secret"
 
 k8s-langfuse:
 	kubectl apply -f deploy/k8s/langfuse.yaml
