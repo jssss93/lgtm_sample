@@ -51,6 +51,59 @@ Orchestrator가 사용자 질의를 분석하여 sub-agent(Search, Summarizer, C
             └────────────┘
 ```
 
+### K8s 모드 — 파드 구성도
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Kubernetes Cluster                               │
+│                                                                          │
+│  ┌──────────────────── agent-platform NS ──────────────────────────────┐│
+│  │                                                                      ││
+│  │  [agent-orchestrator]  ──Dapr──▶  [agent-search]     :8000          ││
+│  │       :8000            ──Dapr──▶  [agent-summarizer] :8000          ││
+│  │       app + dapr sidecar──Dapr──▶  [agent-coder]      :8000         ││
+│  │                                                                      ││
+│  │  각 Pod = app container + dapr sidecar (2 containers)               ││
+│  │  [redis-master] :6379  ◀── Dapr State Store / Pub/Sub               ││
+│  └──────────────────────────────────────────────────────────────────────┘│
+│                                                                          │
+│  ┌──────────────────── dapr-system NS ─────────────────────────────────┐│
+│  │  [dapr-operator]           관리 / CRD 처리                           ││
+│  │  [dapr-sentry]      :443   mTLS 인증서 발급                          ││
+│  │  [dapr-sidecar-injector] :443  Pod에 sidecar 자동 주입 (webhook)     ││
+│  │  [dapr-placement-server] :50005  Actor 배치                          ││
+│  │  [dapr-scheduler-server] :50006  스케줄링 (StatefulSet x3)           ││
+│  │  [dapr-dashboard]   :8080  Dapr 관리 UI                              ││
+│  └──────────────────────────────────────────────────────────────────────┘│
+│                                                                          │
+│  ┌──────────────────── monitoring NS ──────────────────────────────────┐│
+│  │                                                                      ││
+│  │  agents ──OTLP(4317)──▶ [otel-collector] :4317/:4318                ││
+│  │                               │                                      ││
+│  │              ┌────────────────┼──────────────┐                      ││
+│  │              ▼ traces         ▼ logs          ▼ metrics              ││
+│  │          [tempo]           [loki]        [prometheus]                ││
+│  │          :3200/:4317        :3100            :9090                   ││
+│  │              └──────────────┬───────────────┘                       ││
+│  │                             ▼                                        ││
+│  │                    [grafana] :3000 (NodePort 30300)                  ││
+│  └──────────────────────────────────────────────────────────────────────┘│
+│                                                                          │
+│  ┌──────────────────── kube-system NS ─────────────────────────────────┐│
+│  │  [coredns x2]  [metrics-server]  [etcd]  [kube-apiserver]           ││
+│  └──────────────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────────────┘
+
+외부 접근 (포트포워딩)
+  make k8s-port-forward
+  ├── localhost:8000  →  agent-orchestrator (API)
+  ├── localhost:3000  →  grafana
+  └── localhost:9090  →  prometheus
+
+  NodePort (포트포워딩 없이 직접 접근)
+  └── localhost:30300  →  grafana
+```
+
 ### Dapr 모드
 
 ```

@@ -33,6 +33,10 @@ data:
         endpoint: tempo:4317
         tls:
           insecure: true
+        keepalive:
+          time: 10s
+          timeout: 5s
+          permit_without_stream: true
         retry_on_failure:
           enabled: true
           initial_interval: 5s
