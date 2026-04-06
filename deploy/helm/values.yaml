@@ -80,6 +80,12 @@ otel:
   enabled: true
   endpoint: "http://otel-collector:4317"
 
+# Langfuse LLM Observability
+langfuse:
+  enabled: false
+  host: "http://langfuse:3000"
+  secretRef: "langfuse-secret"
+
 # Resiliency 정책
 resiliency:
   retry:

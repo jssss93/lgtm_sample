@@ -442,3 +442,78 @@ spec:
   - port: 3000
     targetPort: 3000
     nodePort: 30301
+
+---
+# ─── Langfuse Worker (이벤트 큐 → ClickHouse 처리) ───────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-worker
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse-worker
+  template:
+    metadata:
+      labels:
+        app: langfuse-worker
+    spec:
+      initContainers:
+      - name: wait-langfuse
+        image: busybox
+        command: ['sh', '-c', 'until nc -z langfuse 3000; do echo waiting for langfuse web; sleep 3; done']
+      containers:
+      - name: langfuse-worker
+        image: langfuse/langfuse-worker:3
+        env:
+        - name: DATABASE_URL
+          value: "postgresql://langfuse:langfuse-pg-pass@langfuse-postgres:5432/langfuse"
+        - name: CLICKHOUSE_MIGRATION_URL
+          value: "clickhouse://default:langfuse-ch-pass@langfuse-clickhouse:9000"
+        - name: CLICKHOUSE_URL
+          value: "http://langfuse-clickhouse:8123"
+        - name: CLICKHOUSE_USER
+          value: "default"
+        - name: CLICKHOUSE_PASSWORD
+          value: "langfuse-ch-pass"
+        - name: CLICKHOUSE_CLUSTER_ENABLED
+          value: "false"
+        - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
+          value: "langfuse-events"
+        - name: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
+          value: "minio-access-key"
+        - name: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
+          value: "minio-secret-key"
+        - name: LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT
+          value: "http://langfuse-minio:9000"
+        - name: LANGFUSE_S3_EVENT_UPLOAD_REGION
+          value: "auto"
+        - name: LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE
+          value: "true"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_BUCKET
+          value: "langfuse-media"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
+          value: "minio-access-key"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
+          value: "minio-secret-key"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT
+          value: "http://langfuse-minio:9000"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_REGION
+          value: "auto"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE
+          value: "true"
+        - name: REDIS_HOST
+          value: "redis-master.agent-platform"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: TELEMETRY_ENABLED
+          value: "false"
+        resources:
+          requests:
+            memory: 256Mi
+            cpu: 100m
+          limits:
+            memory: 512Mi
+            cpu: 300m
