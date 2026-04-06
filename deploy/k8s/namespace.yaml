@@ -4,6 +4,7 @@ metadata:
   name: agent-platform
   labels:
     app.kubernetes.io/part-of: agent-platform
+    dapr.io/enabled: "true"
 ---
 apiVersion: v1
 kind: Namespace
