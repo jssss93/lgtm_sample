@@ -6,7 +6,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-CHART="./helm/agent-platform"
+CHART="./deploy/helm"
 BASE="$CHART/values-local-base.yaml"
 LOCAL="$CHART/values-local.yaml"
 DAPR="$CHART/values-local-dapr.yaml"

@@ -7,7 +7,7 @@ Orchestrator가 사용자 질의를 분석하여 sub-agent(Search, Summarizer, C
 **세 가지 실행 모드를 지원한다:**
 - **기본 모드** (`docker-compose.yml`) — 직접 HTTP 통신, 인메모리 캐시
 - **Dapr 모드** (`docker-compose.dapr.yml`) — Dapr sidecar 기반 서비스 호출, Redis 분산 캐시, Pub/Sub 이벤트
-- **K8s 모드** (`helm/ + k8s-local/`) — Kubernetes 배포, RBAC/SecurityContext/PDB 적용, LGTM 관측성 스택
+- **K8s 모드** (`deploy/helm/ + deploy/k8s/`) — Kubernetes 배포, RBAC/SecurityContext/PDB 적용, LGTM 관측성 스택
 
 ## 아키텍처
 
@@ -191,52 +191,39 @@ lgtm/
 │   ├── hooks/post_gen_project.sh
 │   └── {{cookiecutter.agent_name}}/
 │
-├── dapr-components/                # Dapr 컴포넌트 설정 (Docker Compose용)
-│   ├── statestore.yaml             #   Redis State Store
-│   ├── pubsub.yaml                 #   Redis Pub/Sub
-│   ├── secretstore.yaml            #   Secret Store
-│   ├── resiliency.yaml             #   Retry / Timeout / Circuit Breaker
-│   └── dapr-config.yaml            #   mDNS resolver + Access Control
-│
-├── dapr-secrets/                   # 시크릿 파일 (git 미포함)
-│   └── secrets.json
-│
-├── helm/                           # K8s 배포 (Helm Chart)
-│   └── agent-platform/
-│       ├── Chart.yaml
-│       ├── values.yaml             #   프로덕션 기본 설정
-│       ├── values-local-base.yaml  #   로컬 공통 (agents, image, security)
-│       ├── values-local.yaml       #   로컬 오버라이드 (Dapr 없이)
-│       ├── values-local-dapr.yaml  #   로컬 오버라이드 (Dapr 포함)
-│       └── templates/
-│           ├── _helpers.tpl           # 공통 라벨 헬퍼
-│           ├── agent-deployment.yaml  # SecurityContext, probes, preStop
-│           ├── agent-service.yaml
-│           ├── rbac.yaml              # ServiceAccount + Role + RoleBinding
-│           ├── networkpolicy.yaml     # 에이전트 간 트래픽 격리
-│           ├── pdb.yaml               # PodDisruptionBudget
-│           ├── ingress.yaml
-│           ├── dapr-components.yaml   # Redis State/PubSub + Secret Store
-│           ├── dapr-config.yaml       # Access Control (trustDomain 설정)
-│           └── dapr-resiliency.yaml   # Retry, Timeout, Circuit Breaker
-│
-├── k8s-local/                      # 로컬 K8s 인프라 매니페스트
-│   ├── namespace.yaml              #   agent-platform + monitoring NS
-│   ├── aoai-secret.yaml            #   AOAI Secret 템플릿
-│   ├── redis.yaml                  #   Dapr 모드용 Redis
-│   ├── loadtest-job.yaml           #   부하/장애 테스트 Job + Chaos RBAC
-│   ├── metrics-server.yaml         #   kubectl top 용 (Docker Desktop)
-│   ├── monitoring/                 #   LGTM 관측성 스택
-│   │   ├── otel-collector.yaml     #     OTel Collector (retry, sending_queue)
-│   │   ├── prometheus.yaml         #     Prometheus + cadvisor/kubelet scrape
-│   │   ├── loki.yaml               #     Loki 로그 저장소
-│   │   ├── tempo.yaml              #     Tempo 트레이스 저장소
-│   │   └── grafana.yaml            #     Grafana (커스텀 이미지, 드릴다운 플러그인)
-│   └── grafana-plugins/            #   Grafana 드릴다운 플러그인 (폐쇄망용)
-│       ├── Dockerfile              #     커스텀 이미지 빌드
-│       ├── grafana-exploretraces-app.zip
-│       ├── grafana-lokiexplore-app.zip
-│       └── grafana-metricsdrilldown-app.zip
+├── deploy/                         # 배포 설정 통합
+│   ├── compose/                    #   Docker Compose 전용 설정
+│   │   ├── configs/                #     OTel/Prometheus/Tempo 설정
+│   │   │   ├── otel-config.yaml
+│   │   │   ├── prometheus.yml
+│   │   │   └── tempo.yaml
+│   │   └── dapr/                   #     Dapr 컴포넌트 + 시크릿
+│   │       ├── components/         #       statestore, pubsub, secretstore, resiliency, dapr-config
+│   │       └── secrets/            #       secrets.json (개발용)
+│   │
+│   ├── helm/                       #   K8s Helm Chart
+│   │   ├── Chart.yaml
+│   │   ├── values.yaml             #     프로덕션 기본 설정
+│   │   ├── values-local-base.yaml  #     로컬 공통 (agents, image, security)
+│   │   ├── values-local.yaml       #     로컬 오버라이드 (Dapr 없이)
+│   │   ├── values-local-dapr.yaml  #     로컬 오버라이드 (Dapr 포함)
+│   │   └── templates/              #     K8s 매니페스트 템플릿
+│   │
+│   └── k8s/                        #   로컬 K8s 인프라 매니페스트
+│       ├── namespace.yaml
+│       ├── aoai-secret.yaml
+│       ├── redis.yaml
+│       ├── loadtest-job.yaml
+│       ├── metrics-server.yaml
+│       ├── monitoring/             #     LGTM 관측성 스택
+│       │   ├── otel-collector.yaml
+│       │   ├── prometheus.yaml
+│       │   ├── loki.yaml
+│       │   ├── tempo.yaml
+│       │   └── grafana.yaml
+│       └── grafana-plugins/        #     Grafana 드릴다운 (폐쇄망용)
+│           ├── Dockerfile
+│           └── *.zip
 │
 ├── grafana/provisioning/           # Grafana 프로비저닝 (Docker Compose + K8s 공용)
 │   ├── datasources/datasources.yaml
@@ -258,11 +245,6 @@ lgtm/
 ├── loadgen/                        # 부하 생성기
 │   ├── Dockerfile
 │   └── run.py
-│
-├── yamls/                          # Docker Compose용 설정
-│   ├── otel-config.yaml
-│   ├── prometheus.yml
-│   └── tempo.yaml
 │
 └── docs/                           # 설계 문서
     ├── monitoring-design.md
@@ -308,9 +290,9 @@ open http://localhost:3000
 
 ```bash
 # 1. 시크릿 설정
-#    개발: dapr-secrets/secrets.json 에 AOAI 키 입력
-#    운영: Azure Key Vault 연동 (dapr-components/secretstore.yaml 변경)
-vi dapr-secrets/secrets.json
+#    개발: deploy/compose/dapr/secrets/secrets.json 에 AOAI 키 입력
+#    운영: Azure Key Vault 연동 (deploy/compose/dapr/components/secretstore.yaml 변경)
+vi deploy/compose/dapr/secrets/secrets.json
 
 # 2. Dapr 모드로 실행 (Redis + Placement + Sidecar 포함)
 make dapr-up
@@ -387,14 +369,14 @@ values.yaml              ← 프로덕션 기본값
 
 ```bash
 # 1. values.yaml 에 agent 추가
-vi helm/agent-platform/values.yaml
+vi deploy/helm/values.yaml
 
 # 2. Helm 배포
-helm install agent-platform ./helm/agent-platform \
+helm install agent-platform ./deploy/helm \
   --namespace ai-agents --create-namespace
 
 # 3. 새 agent 추가 시
-helm upgrade agent-platform ./helm/agent-platform
+helm upgrade agent-platform ./deploy/helm
 ```
 
 ## API 사용법
@@ -529,7 +511,7 @@ curl -X POST http://localhost:8003/run -H "Content-Type: application/json" -d '{
 | `grafana-lokiexplore-app` | /drilldown → Logs | 로그 드릴다운 탐색 |
 | `grafana-metricsdrilldown-app` | /drilldown → Metrics | 메트릭 드릴다운 탐색 |
 
-커스텀 Grafana 이미지(`grafana-custom:local`)에 baked-in. 폐쇄망은 `k8s-local/grafana-plugins/*.zip` 사용.
+커스텀 Grafana 이미지(`grafana-custom:local`)에 baked-in. 폐쇄망은 `deploy/k8s/grafana-plugins/*.zip` 사용.
 
 ### 수동 쿼리
 
@@ -641,7 +623,7 @@ rate(llm_token_usage_total[5m])
 
 ## Dapr 컴포넌트 상세 (플랫폼 엔지니어용)
 
-### Resiliency (`dapr-components/resiliency.yaml`)
+### Resiliency (`deploy/compose/dapr/components/resiliency.yaml`)
 
 | 정책 | 대상 | 설정 |
 |------|------|------|
@@ -651,7 +633,7 @@ rate(llm_token_usage_total[5m])
 | **stateTimeout** | state store / pub/sub | 5s |
 | **agentCB** | sub-agent 호출 | 연속 3회 실패 시 circuit open, 30s 후 half-open |
 
-### Access Control (`dapr-components/dapr-config.yaml`)
+### Access Control (`deploy/compose/dapr/components/dapr-config.yaml`)
 
 | App ID | 허용 | 차단 |
 |--------|------|------|
@@ -662,11 +644,11 @@ rate(llm_token_usage_total[5m])
 
 sub-agent끼리는 직접 호출할 수 없다. 반드시 orchestrator를 경유해야 한다.
 
-### Secret Store (`dapr-components/secretstore.yaml`)
+### Secret Store (`deploy/compose/dapr/components/secretstore.yaml`)
 
 | 환경 | 타입 | 설정 |
 |------|------|------|
-| **개발** | `secretstores.local.file` | `dapr-secrets/secrets.json` 참조 |
+| **개발** | `secretstores.local.file` | `deploy/compose/dapr/secrets/secrets.json` 참조 |
 | **운영** | `secretstores.azure.keyvault` | Azure Key Vault 연동 (Helm Chart에 포함) |
 
 Agent 앱은 `localhost:3500/v1.0/secrets/secret-store/azure-openai`로 시크릿을 조회한다. `.env` 파일을 직접 읽지 않으므로 API 키가 Agent 컨테이너에 노출되지 않는다.

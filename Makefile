@@ -98,7 +98,7 @@ dapr-logs-all:
 # 로컬 K8s (minikube / kind / Docker Desktop)
 # ════════════════════════════════════════════════════════════════
 
-HELM_CHART    := ./helm/agent-platform
+HELM_CHART    := ./deploy/helm
 HELM_RELEASE  := agent-platform
 K8S_NS        := agent-platform
 MON_NS        := monitoring
@@ -130,14 +130,14 @@ k8s-build:
 	@echo "✓ agent:local 빌드 완료"
 
 k8s-build-grafana:
-	docker build -t grafana-custom:local ./k8s-local/grafana-plugins
+	docker build -t grafana-custom:local ./deploy/k8s/grafana-plugins
 	@echo "✓ grafana-custom:local 빌드 완료"
 
 k8s-build-all: k8s-build k8s-build-grafana
 
 # ─── 배포 단계 ───
 k8s-setup:
-	kubectl apply -f k8s-local/namespace.yaml
+	kubectl apply -f deploy/k8s/namespace.yaml
 	@echo "✓ 네임스페이스"
 
 k8s-dashboards:
@@ -147,7 +147,7 @@ k8s-dashboards:
 	@echo "✓ 대시보드 ConfigMap"
 
 k8s-monitoring: k8s-dashboards
-	kubectl apply -f k8s-local/monitoring/
+	kubectl apply -f deploy/k8s/monitoring/
 	kubectl wait --for=condition=available deployment/tempo -n $(MON_NS) --timeout=120s
 	kubectl wait --for=condition=available deployment/loki -n $(MON_NS) --timeout=120s
 	kubectl wait --for=condition=available deployment/prometheus -n $(MON_NS) --timeout=120s
@@ -162,7 +162,7 @@ k8s-secret:
 			--from-literal=api-key="$$AZURE_OPENAI_API_KEY" \
 			--from-literal=endpoint="$$AZURE_OPENAI_ENDPOINT" \
 			-n $(K8S_NS)) || \
-		kubectl apply -f k8s-local/aoai-secret.yaml
+		kubectl apply -f deploy/k8s/aoai-secret.yaml
 	@echo "✓ AOAI Secret"
 
 k8s-grafana-plugins:
@@ -180,7 +180,7 @@ k8s-deploy: k8s-setup k8s-secret
 	@echo "✓ Agent 배포 완료"
 
 k8s-deploy-dapr: k8s-setup k8s-secret
-	kubectl apply -f k8s-local/redis.yaml
+	kubectl apply -f deploy/k8s/redis.yaml
 	helm upgrade --install $(HELM_RELEASE) $(HELM_CHART) \
 		-f $(VALUES_BASE) -f $(VALUES_DAPR) \
 		--namespace $(K8S_NS) --wait --timeout 3m
@@ -243,27 +243,27 @@ k8s-test-security:
 # ─── 부하/장애 테스트 ───
 k8s-loadtest:
 	kubectl delete job loadtest -n $(K8S_NS) --ignore-not-found
-	kubectl apply -f k8s-local/loadtest-job.yaml
+	kubectl apply -f deploy/k8s/loadtest-job.yaml
 	kubectl wait --for=condition=complete job/loadtest -n $(K8S_NS) --timeout=300s || true
 	kubectl logs job/loadtest -n $(K8S_NS)
 
 k8s-chaos:
 	kubectl delete job chaos-test -n $(K8S_NS) --ignore-not-found
-	kubectl apply -f k8s-local/loadtest-job.yaml
+	kubectl apply -f deploy/k8s/loadtest-job.yaml
 	kubectl wait --for=condition=complete job/chaos-test -n $(K8S_NS) --timeout=180s || true
 	kubectl logs job/chaos-test -n $(K8S_NS)
 
 # ─── 정리 ───
 k8s-down:
 	helm uninstall $(HELM_RELEASE) --namespace $(K8S_NS) || true
-	kubectl delete -f k8s-local/redis.yaml --ignore-not-found
+	kubectl delete -f deploy/k8s/redis.yaml --ignore-not-found
 	@echo "✓ Agent 제거 (모니터링 유지)"
 
 k8s-clean:
 	helm uninstall $(HELM_RELEASE) --namespace $(K8S_NS) || true
-	kubectl delete -f k8s-local/monitoring/ --ignore-not-found
+	kubectl delete -f deploy/k8s/monitoring/ --ignore-not-found
 	kubectl delete configmap grafana-dashboards -n $(MON_NS) --ignore-not-found
-	kubectl delete -f k8s-local/redis.yaml --ignore-not-found
+	kubectl delete -f deploy/k8s/redis.yaml --ignore-not-found
 	kubectl delete namespace $(K8S_NS) $(MON_NS) --ignore-not-found
 	@echo "✓ 전체 정리 완료"
 

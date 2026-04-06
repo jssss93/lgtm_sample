@@ -34,7 +34,7 @@ services:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--web.enable-remote-write-receiver"
     volumes:
-      - ./yamls/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./deploy/compose/configs/prometheus.yml:/etc/prometheus/prometheus.yml
       - ../lgtm_volume/prometheus:/prometheus
     ports:
       - "9090:9090"
@@ -51,7 +51,7 @@ services:
     image: grafana/tempo:2.6.1
     command: ["-config.file=/etc/tempo.yaml"]
     volumes:
-      - ./yamls/tempo.yaml:/etc/tempo.yaml
+      - ./deploy/compose/configs/tempo.yaml:/etc/tempo.yaml
       - ../lgtm_volume/tempo:/tmp/tempo
     ports:
       - "3200:3200"
@@ -61,7 +61,7 @@ services:
     command: ["--config=/etc/otel-config.yaml"]
     user: "0:0"
     volumes:
-      - ./yamls/otel-config.yaml:/etc/otel-config.yaml
+      - ./deploy/compose/configs/otel-config.yaml:/etc/otel-config.yaml
       - /var/run/docker.sock:/var/run/docker.sock:ro
     ports:
       - "4317:4317"
@@ -113,9 +113,9 @@ services:
       "--resources-path", "/components",
       "--log-level", "info"]
     volumes:
-      - ./dapr-components:/components
-      - ./dapr-components/dapr-config.yaml:/config/dapr-config.yaml
-      - ./dapr-secrets:/dapr-secrets:ro
+      - ./deploy/compose/dapr/components:/components
+      - ./deploy/compose/dapr/components/dapr-config.yaml:/config/dapr-config.yaml
+      - ./deploy/compose/dapr/secrets:/dapr-secrets:ro
     network_mode: "service:agent-orchestrator"
     depends_on:
       - agent-orchestrator
@@ -156,8 +156,8 @@ services:
       "--resources-path", "/components",
       "--log-level", "info"]
     volumes:
-      - ./dapr-components:/components
-      - ./dapr-components/dapr-config.yaml:/config/dapr-config.yaml
+      - ./deploy/compose/dapr/components:/components
+      - ./deploy/compose/dapr/components/dapr-config.yaml:/config/dapr-config.yaml
     network_mode: "service:agent-search"
     depends_on:
       - agent-search
@@ -198,8 +198,8 @@ services:
       "--resources-path", "/components",
       "--log-level", "info"]
     volumes:
-      - ./dapr-components:/components
-      - ./dapr-components/dapr-config.yaml:/config/dapr-config.yaml
+      - ./deploy/compose/dapr/components:/components
+      - ./deploy/compose/dapr/components/dapr-config.yaml:/config/dapr-config.yaml
     network_mode: "service:agent-summarizer"
     depends_on:
       - agent-summarizer
@@ -240,8 +240,8 @@ services:
       "--resources-path", "/components",
       "--log-level", "info"]
     volumes:
-      - ./dapr-components:/components
-      - ./dapr-components/dapr-config.yaml:/config/dapr-config.yaml
+      - ./deploy/compose/dapr/components:/components
+      - ./deploy/compose/dapr/components/dapr-config.yaml:/config/dapr-config.yaml
     network_mode: "service:agent-coder"
     depends_on:
       - agent-coder

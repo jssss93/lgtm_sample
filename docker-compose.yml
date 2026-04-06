@@ -20,7 +20,7 @@ services:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--web.enable-remote-write-receiver"
     volumes:
-      - ./yamls/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./deploy/compose/configs/prometheus.yml:/etc/prometheus/prometheus.yml
       - ../lgtm_volume/prometheus:/prometheus
     ports:
       - "9090:9090"
@@ -37,7 +37,7 @@ services:
     image: grafana/tempo:2.6.1
     command: ["-config.file=/etc/tempo.yaml"]
     volumes:
-      - ./yamls/tempo.yaml:/etc/tempo.yaml
+      - ./deploy/compose/configs/tempo.yaml:/etc/tempo.yaml
       - ../lgtm_volume/tempo:/tmp/tempo
     ports:
       - "3200:3200"
@@ -46,7 +46,7 @@ services:
     image: otel/opentelemetry-collector-contrib:0.149.0
     command: ["--config=/etc/otel-config.yaml"]
     volumes:
-      - ./yamls/otel-config.yaml:/etc/otel-config.yaml
+      - ./deploy/compose/configs/otel-config.yaml:/etc/otel-config.yaml
     ports:
       - "4317:4317"
       - "4318:4318"
