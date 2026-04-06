@@ -88,6 +88,20 @@ spec:
         {{- end }}
         {{- end }}
         {{- end }}
+        {{- if $.Values.langfuse.enabled }}
+        - name: LANGFUSE_HOST
+          value: "{{ $.Values.langfuse.host }}"
+        - name: LANGFUSE_PUBLIC_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ $.Values.langfuse.secretRef }}
+              key: public-key
+        - name: LANGFUSE_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ $.Values.langfuse.secretRef }}
+              key: secret-key
+        {{- end }}
         {{- if $.Values.azureOpenAI.secretRef }}
         - name: AZURE_OPENAI_API_KEY
           valueFrom:

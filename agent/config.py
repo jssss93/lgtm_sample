@@ -5,9 +5,14 @@ OTEL_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"
 SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "ai-agent")
 AGENT_TYPE = os.getenv("AGENT_TYPE", "default")
 MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "3"))
+CB_FAILURE_THRESHOLD = int(os.getenv("CB_FAILURE_THRESHOLD", "5"))
+CB_RECOVERY_TIMEOUT = float(os.getenv("CB_RECOVERY_TIMEOUT", "60"))
 CACHE_TTL = int(os.getenv("CACHE_TTL_SECONDS", "300"))
 CACHE_MAX_SIZE = int(os.getenv("CACHE_MAX_SIZE", "100"))
 PROMPT_LOG_MAX_LEN = int(os.getenv("PROMPT_LOG_MAX_LEN", "500"))
+
+# ──────────────────────────── Langfuse ──────────────────────────
+USE_LANGFUSE = bool(os.getenv("LANGFUSE_PUBLIC_KEY"))
 
 # ──────────────────────────── Quota ─────────────────────────────
 # 사용자/세션별 일일 토큰 제한 (0 = 무제한)

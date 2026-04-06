@@ -5,16 +5,83 @@ import random
 import time
 
 import httpx
-from openai import AsyncAzureOpenAI, RateLimitError, APIStatusError
-
+from openai import RateLimitError, APIStatusError
 from config import (
     AGENT_TYPE, MAX_RETRIES, PROMPT_LOG_MAX_LEN, SUB_AGENT_URLS,
-    USE_DAPR, DAPR_HTTP_PORT, DAPR_APP_ID_MAP, DAPR_SECRET_STORE,
+    USE_DAPR, USE_LANGFUSE, DAPR_HTTP_PORT, DAPR_APP_ID_MAP, DAPR_SECRET_STORE,
+    CB_FAILURE_THRESHOLD, CB_RECOVERY_TIMEOUT,
 )
+
+if USE_LANGFUSE:
+    from langfuse.openai import AsyncAzureOpenAI
+else:
+    from openai import AsyncAzureOpenAI
+
+
+# ──────────────────────────── Circuit Breaker ───────────────────
+class CircuitBreakerOpenError(RuntimeError):
+    pass
+
+
+class CircuitBreaker:
+    CLOSED = "CLOSED"
+    OPEN = "OPEN"
+    HALF_OPEN = "HALF_OPEN"
+
+    def __init__(self, failure_threshold: int, recovery_timeout: float):
+        self._failure_count = 0
+        self._threshold = failure_threshold
+        self._recovery_timeout = recovery_timeout
+        self._state = self.CLOSED
+        self._opened_at: float | None = None
+        self._lock = asyncio.Lock()
+
+    @property
+    def state(self) -> str:
+        return self._state
+
+    async def can_attempt(self) -> bool:
+        async with self._lock:
+            if self._state == self.CLOSED:
+                return True
+            if self._state == self.OPEN:
+                if time.time() - self._opened_at >= self._recovery_timeout:
+                    self._state = self.HALF_OPEN
+                    return True
+                return False
+            return True  # HALF_OPEN: 탐색 호출 1회 허용
+
+    async def record_success(self):
+        async with self._lock:
+            prev = self._state
+            self._failure_count = 0
+            self._state = self.CLOSED
+            return prev  # 상태 전환 여부 반환용
+
+    async def record_failure(self) -> bool:
+        """True 반환 = 방금 OPEN으로 전환됨"""
+        async with self._lock:
+            self._failure_count += 1
+            if self._failure_count >= self._threshold:
+                self._state = self.OPEN
+                self._opened_at = time.time()
+                return True
+            return False
+
+
+# deployment별 circuit breaker 인스턴스
+_circuit_breakers: dict[str, CircuitBreaker] = {}
+
+
+def _get_circuit_breaker(deployment: str) -> CircuitBreaker:
+    if deployment not in _circuit_breakers:
+        _circuit_breakers[deployment] = CircuitBreaker(CB_FAILURE_THRESHOLD, CB_RECOVERY_TIMEOUT)
+    return _circuit_breakers[deployment]
 from otel_setup import (
     tracer, logger,
     llm_call_duration, token_usage_counter, cost_counter,
     request_token_histogram, rate_limit_counter, retry_counter,
+    circuit_breaker_open_counter, circuit_breaker_reject_counter,
 )
 from stats import calc_cost, track_llm_call, track_rate_limit, track_retry
 
@@ -78,9 +145,21 @@ async def close_http_client():
 # ──────────────────────────── LLM Call ──────────────────────────
 async def call_aoai(deployment: str, messages: list[dict], tools: list | None = None) -> tuple:
     """Returns (response, retries_count)."""
+    cb = _get_circuit_breaker(deployment)
+
     with tracer.start_as_current_span("llm-call") as span:
         span.set_attribute("llm.model", deployment)
         span.set_attribute("llm.message_count", len(messages))
+        span.set_attribute("llm.circuit_breaker.state", cb.state)
+
+        if not await cb.can_attempt():
+            circuit_breaker_reject_counter.add(1, {"llm.model": deployment, "agent.type": AGENT_TYPE})
+            span.set_attribute("llm.circuit_breaker.rejected", True)
+            logger.warning("Circuit breaker OPEN — call rejected", extra={"model": deployment})
+            raise CircuitBreakerOpenError(
+                f"Circuit breaker OPEN for {deployment}. "
+                f"Retry after {CB_RECOVERY_TIMEOUT:.0f}s."
+            )
 
         user_msgs = [
             m["content"] for m in messages
@@ -117,6 +196,11 @@ async def call_aoai(deployment: str, messages: list[dict], tools: list | None = 
                 if attempt < MAX_RETRIES:
                     await asyncio.sleep(retry_after)
                 else:
+                    just_opened = await cb.record_failure()
+                    if just_opened:
+                        circuit_breaker_open_counter.add(1, {"llm.model": deployment, "agent.type": AGENT_TYPE})
+                        span.set_attribute("llm.circuit_breaker.opened", True)
+                        logger.warning("Circuit breaker opened", extra={"model": deployment, "failure_count": CB_FAILURE_THRESHOLD})
                     raise
             except APIStatusError as e:
                 retries += 1
@@ -132,8 +216,14 @@ async def call_aoai(deployment: str, messages: list[dict], tools: list | None = 
                     backoff = 2 ** attempt + random.uniform(0, 1)
                     await asyncio.sleep(backoff)
                 else:
+                    just_opened = await cb.record_failure()
+                    if just_opened:
+                        circuit_breaker_open_counter.add(1, {"llm.model": deployment, "agent.type": AGENT_TYPE})
+                        span.set_attribute("llm.circuit_breaker.opened", True)
+                        logger.warning("Circuit breaker opened", extra={"model": deployment, "failure_count": CB_FAILURE_THRESHOLD})
                     raise
 
+        await cb.record_success()
         duration = time.time() - start
         usage = response.usage
         call_cost = calc_cost(deployment, usage.prompt_tokens, usage.completion_tokens)

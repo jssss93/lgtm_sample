@@ -34,6 +34,10 @@ async def lifespan(app: FastAPI):
     logger.info("Agent shutting down", extra={"agent_type": AGENT_TYPE})
     await close_http_client()
     shutdown_providers()
+    from config import USE_LANGFUSE
+    if USE_LANGFUSE:
+        from langfuse import Langfuse
+        Langfuse().flush()
 
 
 app = FastAPI(title=f"AI Agent - {AGENT_TYPE}", lifespan=lifespan)

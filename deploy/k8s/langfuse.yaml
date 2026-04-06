@@ -1,0 +1,444 @@
+# ─── Langfuse v3 — PostgreSQL + ClickHouse + Langfuse ────────────────────────
+# Langfuse UI: http://localhost:30301  (초기 계정: 첫 접속 시 회원가입)
+# API Keys 발급 순서:
+#   1. http://localhost:30301 접속 → 계정 생성 → 프로젝트 생성
+#   2. Settings → API Keys → Create Key
+#   3. 발급된 public-key / secret-key 를 langfuse-secret 에 업데이트
+#      kubectl create secret generic langfuse-secret -n monitoring \
+#        --from-literal=public-key=pk-lf-xxxx \
+#        --from-literal=secret-key=sk-lf-xxxx \
+#        --from-literal=nextauth-secret=<32자이상-랜덤문자열> \
+#        --from-literal=salt=<32자이상-랜덤문자열> \
+#        --dry-run=client -o yaml | kubectl apply -f -
+#   4. kubectl rollout restart deployment -n agent-platform (agent 재시작)
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: langfuse-secret
+  namespace: monitoring
+type: Opaque
+stringData:
+  nextauth-secret: "langfuse-nextauth-secret-local-dev-32chars!!"
+  salt: "langfuse-salt-for-hashing-local-32chars!!"
+  # LANGFUSE_INIT_* 로 자동 생성됨 — 변경 시 langfuse Pod 재시작 필요
+  public-key: "pk-lf-local-dev-auto-init-key"
+  secret-key: "sk-lf-local-dev-auto-init-key"
+
+---
+# ─── PostgreSQL ──────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Secret
+metadata:
+  name: langfuse-postgres-secret
+  namespace: monitoring
+type: Opaque
+stringData:
+  password: "langfuse-pg-pass"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-postgres
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse-postgres
+  template:
+    metadata:
+      labels:
+        app: langfuse-postgres
+    spec:
+      initContainers:
+      - name: fix-permissions
+        image: busybox
+        command: ["sh", "-c", "chown -R 999:999 /var/lib/postgresql/data"]
+        securityContext:
+          runAsUser: 0
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/postgresql/data
+      containers:
+      - name: postgres
+        image: postgres:16-alpine
+        env:
+        - name: POSTGRES_USER
+          value: langfuse
+        - name: POSTGRES_DB
+          value: langfuse
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-postgres-secret
+              key: password
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        ports:
+        - containerPort: 5432
+        resources:
+          requests:
+            memory: 256Mi
+            cpu: 100m
+          limits:
+            memory: 512Mi
+            cpu: 200m
+        readinessProbe:
+          exec:
+            command: ["pg_isready", "-U", "langfuse"]
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/postgresql/data
+      volumes:
+      - name: data
+        hostPath:
+          path: /Users/jongsu/git/js_project/lgtm_volume/langfuse-db
+          type: DirectoryOrCreate
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-postgres
+  namespace: monitoring
+spec:
+  selector:
+    app: langfuse-postgres
+  ports:
+  - port: 5432
+    targetPort: 5432
+
+---
+# ─── ClickHouse ──────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-clickhouse
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse-clickhouse
+  template:
+    metadata:
+      labels:
+        app: langfuse-clickhouse
+    spec:
+      initContainers:
+      - name: fix-permissions
+        image: busybox
+        command: ["sh", "-c", "chown -R 101:101 /var/lib/clickhouse /var/log/clickhouse-server"]
+        securityContext:
+          runAsUser: 0
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/clickhouse
+        - name: logs
+          mountPath: /var/log/clickhouse-server
+      containers:
+      - name: clickhouse
+        image: clickhouse/clickhouse-server:24.8-alpine
+        env:
+        - name: CLICKHOUSE_DB
+          value: langfuse
+        - name: CLICKHOUSE_USER
+          value: default
+        - name: CLICKHOUSE_PASSWORD
+          value: langfuse-ch-pass
+        ports:
+        - containerPort: 8123
+          name: http
+        - containerPort: 9000
+          name: native
+        resources:
+          requests:
+            memory: 512Mi
+            cpu: 200m
+          limits:
+            memory: 1Gi
+            cpu: 500m
+        readinessProbe:
+          httpGet:
+            path: /ping
+            port: 8123
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/clickhouse
+        - name: logs
+          mountPath: /var/log/clickhouse-server
+      volumes:
+      - name: data
+        hostPath:
+          path: /Users/jongsu/git/js_project/lgtm_volume/langfuse-ch
+          type: DirectoryOrCreate
+      - name: logs
+        hostPath:
+          path: /Users/jongsu/git/js_project/lgtm_volume/langfuse-ch-logs
+          type: DirectoryOrCreate
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-clickhouse
+  namespace: monitoring
+spec:
+  selector:
+    app: langfuse-clickhouse
+  ports:
+  - port: 8123
+    targetPort: 8123
+    name: http
+  - port: 9000
+    targetPort: 9000
+    name: native
+
+---
+# ─── MinIO ───────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-minio
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse-minio
+  template:
+    metadata:
+      labels:
+        app: langfuse-minio
+    spec:
+      initContainers:
+      - name: fix-permissions
+        image: busybox
+        command: ["sh", "-c", "chown -R 1000:1000 /data"]
+        securityContext:
+          runAsUser: 0
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      containers:
+      - name: minio
+        image: minio/minio:latest
+        command: ["minio", "server", "/data", "--console-address", ":9001"]
+        env:
+        - name: MINIO_ROOT_USER
+          value: "minio-access-key"
+        - name: MINIO_ROOT_PASSWORD
+          value: "minio-secret-key"
+        ports:
+        - containerPort: 9000
+          name: api
+        - containerPort: 9001
+          name: console
+        resources:
+          requests:
+            memory: 256Mi
+            cpu: 100m
+          limits:
+            memory: 512Mi
+            cpu: 200m
+        readinessProbe:
+          httpGet:
+            path: /minio/health/ready
+            port: 9000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        hostPath:
+          path: /Users/jongsu/git/js_project/lgtm_volume/langfuse-minio
+          type: DirectoryOrCreate
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-minio
+  namespace: monitoring
+spec:
+  selector:
+    app: langfuse-minio
+  ports:
+  - port: 9000
+    targetPort: 9000
+    name: api
+  - port: 9001
+    targetPort: 9001
+    name: console
+
+---
+# ─── Langfuse v3 ─────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse
+  template:
+    metadata:
+      labels:
+        app: langfuse
+    spec:
+      initContainers:
+      - name: wait-postgres
+        image: busybox
+        command: ['sh', '-c', 'until nc -z langfuse-postgres 5432; do echo waiting for postgres; sleep 2; done']
+      - name: wait-clickhouse
+        image: busybox
+        command: ['sh', '-c', 'until nc -z langfuse-clickhouse 8123; do echo waiting for clickhouse; sleep 2; done']
+      - name: wait-minio
+        image: busybox
+        command: ['sh', '-c', 'until nc -z langfuse-minio 9000; do echo waiting for minio; sleep 2; done']
+      - name: create-minio-buckets
+        image: minio/mc:latest
+        command:
+        - sh
+        - -c
+        - |
+          mc alias set minio http://langfuse-minio:9000 minio-access-key minio-secret-key
+          mc mb --ignore-existing minio/langfuse-events
+          mc mb --ignore-existing minio/langfuse-media
+          echo "Buckets created"
+      containers:
+      - name: langfuse
+        image: langfuse/langfuse:3
+        env:
+        - name: DATABASE_URL
+          value: "postgresql://langfuse:langfuse-pg-pass@langfuse-postgres:5432/langfuse"
+        - name: CLICKHOUSE_MIGRATION_URL
+          value: "clickhouse://default:langfuse-ch-pass@langfuse-clickhouse:9000"
+        - name: CLICKHOUSE_URL
+          value: "http://langfuse-clickhouse:8123"
+        - name: CLICKHOUSE_USER
+          value: "default"
+        - name: CLICKHOUSE_PASSWORD
+          value: "langfuse-ch-pass"
+        - name: NEXTAUTH_URL
+          value: "http://localhost:30301"
+        - name: NEXTAUTH_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secret
+              key: nextauth-secret
+        - name: SALT
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secret
+              key: salt
+        - name: CLICKHOUSE_CLUSTER_ENABLED
+          value: "false"
+        - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
+          value: "langfuse-events"
+        - name: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
+          value: "minio-access-key"
+        - name: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
+          value: "minio-secret-key"
+        - name: LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT
+          value: "http://langfuse-minio:9000"
+        - name: LANGFUSE_S3_EVENT_UPLOAD_REGION
+          value: "auto"
+        - name: LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE
+          value: "true"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_ENABLED
+          value: "true"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_BUCKET
+          value: "langfuse-media"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
+          value: "minio-access-key"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
+          value: "minio-secret-key"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT
+          value: "http://langfuse-minio:9000"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_REGION
+          value: "auto"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE
+          value: "true"
+        # ─── 초기 자동 설정 (첫 기동 시 조직/프로젝트/API키 자동 생성) ───
+        - name: LANGFUSE_INIT_ORG_ID
+          value: "local-org"
+        - name: LANGFUSE_INIT_ORG_NAME
+          value: "Local Dev"
+        - name: LANGFUSE_INIT_PROJECT_ID
+          value: "local-project"
+        - name: LANGFUSE_INIT_PROJECT_NAME
+          value: "LGTM Agent"
+        - name: LANGFUSE_INIT_PROJECT_PUBLIC_KEY
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secret
+              key: public-key
+        - name: LANGFUSE_INIT_PROJECT_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secret
+              key: secret-key
+        - name: LANGFUSE_INIT_USER_EMAIL
+          value: "admin@local.dev"
+        - name: LANGFUSE_INIT_USER_NAME
+          value: "Admin"
+        - name: LANGFUSE_INIT_USER_PASSWORD
+          value: "Admin1234!"
+        - name: TELEMETRY_ENABLED
+          value: "false"
+        - name: LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES
+          value: "true"
+        - name: REDIS_HOST
+          value: "redis-master.agent-platform"
+        - name: REDIS_PORT
+          value: "6379"
+        ports:
+        - containerPort: 3000
+        resources:
+          requests:
+            memory: 512Mi
+            cpu: 200m
+          limits:
+            memory: 1Gi
+            cpu: 500m
+        readinessProbe:
+          httpGet:
+            path: /api/public/health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 6
+        livenessProbe:
+          httpGet:
+            path: /api/public/health
+            port: 3000
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          failureThreshold: 3
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse
+  namespace: monitoring
+spec:
+  type: NodePort
+  selector:
+    app: langfuse
+  ports:
+  - port: 3000
+    targetPort: 3000
+    nodePort: 30301

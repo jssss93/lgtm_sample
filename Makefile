@@ -1,29 +1,31 @@
 .PHONY: up down build restart logs status clean health stats test-unit query-traces query-logs query-metrics
 
-# ─── 전체 스택 (모니터링 + Agent 4개 + LoadGen) ───
+COMPOSE := docker-compose -f docker-compose.dapr.yml
+
+# ─── 전체 스택 (모니터링 + Agent 4개 + LoadGen, Dapr 모드) ───
 up:
-	docker-compose up -d --build
+	$(COMPOSE) up -d --build
 
 down:
-	docker-compose down
+	$(COMPOSE) down
 
 restart:
-	docker-compose down && docker-compose up -d --build
+	$(COMPOSE) down && $(COMPOSE) up -d --build
 
 logs:
-	docker-compose logs -f
+	$(COMPOSE) logs -f
 
 logs-agents:
-	docker-compose logs -f agent-orchestrator agent-search agent-summarizer agent-coder
+	$(COMPOSE) logs -f agent-orchestrator agent-search agent-summarizer agent-coder
 
 logs-loadgen:
-	docker-compose logs -f loadgen
+	$(COMPOSE) logs -f loadgen
 
 status:
-	docker-compose ps
+	$(COMPOSE) ps
 
 clean:
-	docker-compose down -v --rmi local
+	$(COMPOSE) down -v --rmi local
 
 # ─── 테스트 ───
 test-orchestrator:
@@ -73,26 +75,9 @@ stats-all:
 		curl -s http://localhost:$$port/stats | python3 -c "import sys,json; d=json.load(sys.stdin); t=d['total_tokens']; print(f\"{d['agent_type']:<16} reqs={d['total_requests']:<6} tokens={t['total']:<8} cost=\$${ d['total_cost_usd']:.6f}\")"; \
 	done
 
-# ─── Dapr 모드 ───
-DAPR_COMPOSE := docker-compose -f docker-compose.dapr.yml
-
-dapr-up:
-	$(DAPR_COMPOSE) up -d --build
-
-dapr-down:
-	$(DAPR_COMPOSE) down
-
-dapr-restart:
-	$(DAPR_COMPOSE) down && $(DAPR_COMPOSE) up -d --build
-
-dapr-status:
-	$(DAPR_COMPOSE) ps
-
+# ─── Dapr 사이드카 로그 (별도 확인용) ───
 dapr-logs:
-	$(DAPR_COMPOSE) logs -f orchestrator-dapr search-dapr summarizer-dapr coder-dapr
-
-dapr-logs-all:
-	$(DAPR_COMPOSE) logs -f
+	$(COMPOSE) logs -f orchestrator-dapr search-dapr summarizer-dapr coder-dapr
 
 # ════════════════════════════════════════════════════════════════
 # 로컬 K8s (minikube / kind / Docker Desktop)
@@ -165,6 +150,14 @@ k8s-secret:
 		kubectl apply -f deploy/k8s/aoai-secret.yaml
 	@echo "✓ AOAI Secret"
 
+k8s-langfuse:
+	kubectl apply -f deploy/k8s/langfuse.yaml
+	kubectl wait --for=condition=available deployment/langfuse-postgres -n $(MON_NS) --timeout=120s
+	kubectl wait --for=condition=available deployment/langfuse-clickhouse -n $(MON_NS) --timeout=120s
+	kubectl wait --for=condition=available deployment/langfuse-minio -n $(MON_NS) --timeout=120s
+	kubectl wait --for=condition=available deployment/langfuse -n $(MON_NS) --timeout=180s
+	@echo "✓ Langfuse: http://localhost:30301  (admin@local.dev / Admin1234!)"
+
 k8s-grafana-plugins:
 	@for plugin in grafana-exploretraces-app grafana-lokiexplore-app grafana-metricsdrilldown-app; do \
 		curl -s -X POST "http://localhost:30300/api/plugins/$$plugin/settings" \
@@ -174,31 +167,19 @@ k8s-grafana-plugins:
 	@echo "✓ Grafana 플러그인 활성화"
 
 k8s-deploy: k8s-setup k8s-secret
-	helm upgrade --install $(HELM_RELEASE) $(HELM_CHART) \
-		-f $(VALUES_BASE) -f $(VALUES_LOCAL) \
-		--namespace $(K8S_NS) --wait --timeout 3m
-	@echo "✓ Agent 배포 완료"
-
-k8s-deploy-dapr: k8s-setup k8s-secret
 	kubectl apply -f deploy/k8s/redis.yaml
 	helm upgrade --install $(HELM_RELEASE) $(HELM_CHART) \
 		-f $(VALUES_BASE) -f $(VALUES_DAPR) \
 		--namespace $(K8S_NS) --wait --timeout 3m
-	@echo "✓ Agent (Dapr 모드) 배포 완료"
+	@echo "✓ Agent 배포 완료 (Dapr 모드)"
 
 # ─── 원스텝 배포 ───
-k8s-up: k8s-build-all k8s-setup k8s-monitoring k8s-deploy k8s-grafana-plugins
-	@echo ""
-	@echo "════════════════════════════════════════"
-	@echo "  로컬 K8s 배포 완료!"
-	@echo "  Grafana: http://localhost:30300"
-	@echo "════════════════════════════════════════"
-
-k8s-up-dapr: k8s-build-all k8s-setup k8s-monitoring k8s-deploy-dapr k8s-grafana-plugins
+k8s-up: k8s-build-all k8s-setup k8s-monitoring k8s-deploy k8s-langfuse k8s-grafana-plugins
 	@echo ""
 	@echo "════════════════════════════════════════"
 	@echo "  로컬 K8s + Dapr 배포 완료!"
-	@echo "  Grafana: http://localhost:30300"
+	@echo "  Grafana:  http://localhost:30300"
+	@echo "  Langfuse: http://localhost:30301"
 	@echo "════════════════════════════════════════"
 
 # ─── 상태 확인 ───

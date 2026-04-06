@@ -50,6 +50,8 @@ retry_counter = meter.create_counter("llm.retry.count", description="LLM call re
 cache_hit_counter = meter.create_counter("cache.hit.count", description="Cache hits")
 cache_miss_counter = meter.create_counter("cache.miss.count", description="Cache misses")
 quota_reject_counter = meter.create_counter("quota.reject.count", description="Quota rejections")
+circuit_breaker_open_counter = meter.create_counter("llm.circuit_breaker.open", description="Circuit breaker opened")
+circuit_breaker_reject_counter = meter.create_counter("llm.circuit_breaker.reject", description="Calls rejected by open circuit breaker")
 
 # ──────────────────────────── Logs ──────────────────────────────
 logger_provider = LoggerProvider(resource=resource)

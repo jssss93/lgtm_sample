@@ -56,6 +56,11 @@ otel:
   enabled: true
   endpoint: "http://otel-collector.monitoring:4317"
 
+langfuse:
+  enabled: true
+  host: "http://langfuse.monitoring:3000"
+  secretRef: "langfuse-secret"
+
 securityContext:
   pod:
     enabled: true
