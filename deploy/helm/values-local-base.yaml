@@ -11,8 +11,12 @@ agents:
     replicas: 1
     port: 8000
     resources:
-      memory: 256Mi
-      cpu: 250m
+      requests:
+        memory: 256Mi
+        cpu: 100m
+      limits:
+        memory: 512Mi
+        cpu: 500m
     isOrchestrator: true
 
   - name: search
@@ -21,8 +25,12 @@ agents:
     replicas: 1
     port: 8001
     resources:
-      memory: 128Mi
-      cpu: 100m
+      requests:
+        memory: 128Mi
+        cpu: 50m
+      limits:
+        memory: 256Mi
+        cpu: 200m
 
   - name: summarizer
     type: summarizer
@@ -30,8 +38,12 @@ agents:
     replicas: 1
     port: 8002
     resources:
-      memory: 128Mi
-      cpu: 100m
+      requests:
+        memory: 128Mi
+        cpu: 50m
+      limits:
+        memory: 256Mi
+        cpu: 200m
 
   - name: coder
     type: coder
@@ -39,8 +51,12 @@ agents:
     replicas: 1
     port: 8003
     resources:
-      memory: 256Mi
-      cpu: 250m
+      requests:
+        memory: 256Mi
+        cpu: 100m
+      limits:
+        memory: 512Mi
+        cpu: 500m
 
 image:
   repository: agent

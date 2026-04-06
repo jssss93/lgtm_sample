@@ -10,8 +10,12 @@ agents:
     replicas: 1
     port: 8000
     resources:
-      memory: 512Mi
-      cpu: 500m
+      requests:
+        memory: 512Mi
+        cpu: 250m
+      limits:
+        memory: 1Gi
+        cpu: 1000m
     isOrchestrator: true
 
   - name: search
@@ -20,8 +24,12 @@ agents:
     replicas: 2
     port: 8001
     resources:
-      memory: 256Mi
-      cpu: 250m
+      requests:
+        memory: 256Mi
+        cpu: 100m
+      limits:
+        memory: 512Mi
+        cpu: 500m
 
   - name: summarizer
     type: summarizer
@@ -29,8 +37,12 @@ agents:
     replicas: 2
     port: 8002
     resources:
-      memory: 256Mi
-      cpu: 250m
+      requests:
+        memory: 256Mi
+        cpu: 100m
+      limits:
+        memory: 512Mi
+        cpu: 500m
 
   - name: coder
     type: coder
@@ -38,8 +50,12 @@ agents:
     replicas: 1
     port: 8003
     resources:
-      memory: 512Mi
-      cpu: 500m
+      requests:
+        memory: 512Mi
+        cpu: 250m
+      limits:
+        memory: 1Gi
+        cpu: 1000m
 
 # ════════════════════════════════════════════════════════════════
 # 플랫폼 엔지니어가 관리하는 영역
