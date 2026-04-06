@@ -33,7 +33,7 @@ data:
       trace:
         backend: local
         local:
-          path: /tmp/tempo
+          path: /tmp/tempo/blocks
         wal:
           path: /tmp/tempo/wal
 ---
