@@ -4,8 +4,8 @@
 
 | 파일 | 종류 | 의존성 | 실행 방법 |
 |------|------|--------|----------|
-| `test_unit.py` | 단위 테스트 (24개) | 없음 | `make test-unit` |
-| `test_agents.py` | 통합 테스트 | docker-compose up 필요 | `pytest tests/test_agents.py -v` |
+| `test_unit.py` | 단위 테스트 (29개) | 없음 | `make test-unit` |
+| `test_agents.py` | 통합 테스트 | K8s 배포 필요 | `pytest tests/test_agents.py -v` |
 | `test_helm_values.sh` | Helm 차트 검증 (18 checks) | helm CLI만 | `make test-helm` |
 | `test_k8s_smoke.sh` | K8s E2E 스모크 (29 checks) | K8s 클러스터 필요 | `make test-k8s` |
 
@@ -35,7 +35,14 @@
 - `UserQuota` 비용 초과: used_usd >= quota_usd 시 에러 메시지 반환
 
 ### 메트릭 레코더 (1개) — `infrastructure.metrics_otel.NoOpMetricsRecorder`
-- 5개 메서드 호출 시 예외 없이 정상 완료 (NoOp 보증)
+- 6개 메서드 호출 시 예외 없이 정상 완료 (NoOp 보증, `record_quality_score` 포함)
+
+### 품질 점수 계산 (5개) — `application.use_cases._compute_quality_score`
+- 정상 긴 응답 → 0.8 이상
+- 짧은 응답 + 에러 키워드 → 0.5 미만
+- 에러 키워드 단독 → 0.8 미만
+- 미완결 문장 → 0.8 이하
+- 빈 문자열 → 0.0 (바닥값 보장)
 
 ### HTTP 모델 (3개) — `models`
 - `AgentRequest`: 기본 필드 (query만 필수)

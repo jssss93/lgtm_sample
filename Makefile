@@ -1,92 +1,33 @@
-.PHONY: up down build restart logs status clean health stats test-unit query-traces query-logs query-metrics
-
-COMPOSE := docker-compose -f docker-compose.dapr.yml
-
-# ─── 전체 스택 (모니터링 + Agent 4개 + LoadGen, Dapr 모드) ───
-up:
-	$(COMPOSE) up -d --build
-
-down:
-	$(COMPOSE) down
-
-restart:
-	$(COMPOSE) down && $(COMPOSE) up -d --build
-
-logs:
-	$(COMPOSE) logs -f
-
-logs-agents:
-	$(COMPOSE) logs -f agent-orchestrator agent-search agent-summarizer agent-coder
-
-logs-loadgen:
-	$(COMPOSE) logs -f loadgen
-
-status:
-	$(COMPOSE) ps
-
-clean:
-	$(COMPOSE) down -v --rmi local
-
-# ─── 테스트 ───
-test-orchestrator:
-	@curl -s -X POST http://localhost:8000/run \
-		-H "Content-Type: application/json" \
-		-d '{"query": "What is the capital of France?"}' | python3 -m json.tool
-
-test-search:
-	@curl -s -X POST http://localhost:8001/run \
-		-H "Content-Type: application/json" \
-		-d '{"query": "What is Kubernetes?"}' | python3 -m json.tool
-
-test-summarizer:
-	@curl -s -X POST http://localhost:8002/run \
-		-H "Content-Type: application/json" \
-		-d '{"query": "Summarize: OpenTelemetry is a collection of APIs, SDKs, and tools for observability."}' | python3 -m json.tool
-
-test-coder:
-	@curl -s -X POST http://localhost:8003/run \
-		-H "Content-Type: application/json" \
-		-d '{"query": "Write a Python function for binary search"}' | python3 -m json.tool
-
-test-unit:
-	@cd agent && .venv/bin/python -m pytest ../tests/test_unit.py -v
-
-test-all:
-	@echo "=== Orchestrator ===" && make test-orchestrator
-	@echo "\n=== Search ===" && make test-search
-	@echo "\n=== Summarizer ===" && make test-summarizer
-	@echo "\n=== Coder ===" && make test-coder
-
-health:
-	@echo "=== Orchestrator ===" && curl -s http://localhost:8000/health | python3 -m json.tool
-	@echo "=== Search ===" && curl -s http://localhost:8001/health | python3 -m json.tool
-	@echo "=== Summarizer ===" && curl -s http://localhost:8002/health | python3 -m json.tool
-	@echo "=== Coder ===" && curl -s http://localhost:8003/health | python3 -m json.tool
-
-stats:
-	@echo "=== Orchestrator ===" && curl -s http://localhost:8000/stats | python3 -m json.tool
-	@echo "\n=== Search ===" && curl -s http://localhost:8001/stats | python3 -m json.tool
-	@echo "\n=== Summarizer ===" && curl -s http://localhost:8002/stats | python3 -m json.tool
-	@echo "\n=== Coder ===" && curl -s http://localhost:8003/stats | python3 -m json.tool
-
-stats-all:
-	@echo "=== All Agents Cost Summary ===" && \
-	for port in 8000 8001 8002 8003; do \
-		curl -s http://localhost:$$port/stats | python3 -c "import sys,json; d=json.load(sys.stdin); t=d['total_tokens']; print(f\"{d['agent_type']:<16} reqs={d['total_requests']:<6} tokens={t['total']:<8} cost=\$${ d['total_cost_usd']:.6f}\")"; \
-	done
-
-# ─── Dapr 사이드카 로그 (별도 확인용) ───
-dapr-logs:
-	$(COMPOSE) logs -f orchestrator-dapr search-dapr summarizer-dapr coder-dapr
+.PHONY: health stats test-unit test-eval test-all test-helm test-k8s query-traces query-metrics
 
 # ════════════════════════════════════════════════════════════════
 # 로컬 K8s (minikube / kind / Docker Desktop)
 # ════════════════════════════════════════════════════════════════
 
-HELM_CHART    := ./deploy/helm
+HELM_CHART    := ./infra/helm
+ORCH_URL      := http://localhost:30800
+
+# ─── 에이전트 테스트 (NodePort 경유) ───
+test-orchestrator:
+	@curl -s -X POST $(ORCH_URL)/run \
+		-H "Content-Type: application/json" \
+		-d '{"query": "What is the capital of France?"}' | python3 -m json.tool
+
+health:
+	@curl -s $(ORCH_URL)/health | python3 -m json.tool
+
+stats:
+	@curl -s $(ORCH_URL)/stats | python3 -m json.tool
+
+test-unit:
+	@cd apps/agent && .venv/bin/python -m pytest ../../tests/test_unit.py -v
+
+test-eval:
+	@cd apps/agent && .venv/bin/python -m pytest ../../tests/test_eval.py -v --asyncio-mode=auto
 HELM_RELEASE  := agent-platform
 K8S_NS        := agent-platform
 MON_NS        := monitoring
+LANGFUSE_NS   := langfuse
 VALUES_BASE   := $(HELM_CHART)/values-local-base.yaml
 VALUES_LOCAL  := $(HELM_CHART)/values-local.yaml
 VALUES_DAPR   := $(HELM_CHART)/values-local-dapr.yaml
@@ -111,28 +52,28 @@ helm-validate: helm-lint
 
 # ─── 이미지 빌드 ───
 k8s-build:
-	docker build -t agent:local ./agent
+	docker build -t agent:local ./apps/agent
 	@echo "✓ agent:local 빌드 완료"
 
 k8s-build-grafana:
-	docker build -t grafana-custom:local ./deploy/k8s/grafana-plugins
+	docker build -t grafana-custom:local ./infra/k8s/grafana-plugins
 	@echo "✓ grafana-custom:local 빌드 완료"
 
 k8s-build-all: k8s-build k8s-build-grafana
 
 # ─── 배포 단계 ───
 k8s-setup:
-	kubectl apply -f deploy/k8s/namespace.yaml
+	kubectl apply -f infra/k8s/namespace.yaml
 	@echo "✓ 네임스페이스"
 
 k8s-dashboards:
 	kubectl create configmap grafana-dashboards \
-		--from-file=grafana/provisioning/dashboards/json/ \
+		--from-file=infra/grafana/provisioning/dashboards/json/ \
 		-n $(MON_NS) --dry-run=client -o yaml | kubectl apply -f -
 	@echo "✓ 대시보드 ConfigMap"
 
 k8s-monitoring: k8s-dashboards
-	kubectl apply -f deploy/k8s/monitoring/
+	kubectl apply -f infra/k8s/monitoring/
 	kubectl wait --for=condition=available deployment/tempo -n $(MON_NS) --timeout=120s
 	kubectl wait --for=condition=available deployment/loki -n $(MON_NS) --timeout=120s
 	kubectl wait --for=condition=available deployment/prometheus -n $(MON_NS) --timeout=120s
@@ -147,33 +88,33 @@ k8s-secret:
 			--from-literal=api-key="$$AZURE_OPENAI_API_KEY" \
 			--from-literal=endpoint="$$AZURE_OPENAI_ENDPOINT" \
 			-n $(K8S_NS)) || \
-		kubectl apply -f deploy/k8s/aoai-secret.yaml
+		kubectl apply -f infra/k8s/aoai-secret.yaml
 	@echo "✓ AOAI Secret"
 	@kubectl get secret langfuse-secret -n $(K8S_NS) > /dev/null 2>&1 || \
 		kubectl create secret generic langfuse-secret \
 			--from-literal=public-key="pk-lf-local-dev-auto-init-key" \
 			--from-literal=secret-key="sk-lf-local-dev-auto-init-key" \
 			-n $(K8S_NS)
-	@echo "✓ Langfuse Secret"
+	@echo "✓ Langfuse Secret (agent-platform)"
 
 k8s-langfuse:
-	kubectl apply -f deploy/k8s/langfuse.yaml
-	kubectl wait --for=condition=available deployment/langfuse-postgres -n $(MON_NS) --timeout=120s
-	kubectl wait --for=condition=available deployment/langfuse-clickhouse -n $(MON_NS) --timeout=120s
-	kubectl wait --for=condition=available deployment/langfuse-minio -n $(MON_NS) --timeout=120s
-	kubectl wait --for=condition=available deployment/langfuse -n $(MON_NS) --timeout=180s
-	@echo "✓ Langfuse: http://localhost:30301  (admin@local.dev / Admin1234!)"
+	kubectl apply -f infra/k8s/langfuse.yaml
+	kubectl wait --for=condition=available deployment/langfuse-postgres -n $(LANGFUSE_NS) --timeout=120s
+	kubectl wait --for=condition=available deployment/langfuse-clickhouse -n $(LANGFUSE_NS) --timeout=120s
+	kubectl wait --for=condition=available deployment/langfuse-minio -n $(LANGFUSE_NS) --timeout=120s
+	kubectl wait --for=condition=available deployment/langfuse -n $(LANGFUSE_NS) --timeout=180s
+	@echo "✓ Langfuse: http://localhost:30401  (admin@local.dev / Admin1234!)"
 
 k8s-grafana-plugins:
 	@for plugin in grafana-exploretraces-app grafana-lokiexplore-app grafana-metricsdrilldown-app; do \
-		curl -s -X POST "http://localhost:30300/api/plugins/$$plugin/settings" \
+		curl -s -X POST "http://localhost:30400/api/plugins/$$plugin/settings" \
 			-H "Content-Type: application/json" -d '{"enabled":true}' > /dev/null 2>&1 \
 			&& echo "  ✓ $$plugin" || echo "  - $$plugin (skip)"; \
 	done
 	@echo "✓ Grafana 플러그인 활성화"
 
 k8s-deploy: k8s-setup k8s-secret
-	kubectl apply -f deploy/k8s/redis.yaml
+	kubectl apply -f infra/k8s/redis.yaml
 	helm upgrade --install $(HELM_RELEASE) $(HELM_CHART) \
 		-f $(VALUES_BASE) -f $(VALUES_DAPR) \
 		--namespace $(K8S_NS) --wait --timeout 3m
@@ -184,14 +125,15 @@ k8s-up: k8s-build-all k8s-setup k8s-monitoring k8s-deploy k8s-langfuse k8s-grafa
 	@echo ""
 	@echo "════════════════════════════════════════"
 	@echo "  로컬 K8s + Dapr 배포 완료!"
-	@echo "  Grafana:  http://localhost:30300"
-	@echo "  Langfuse: http://localhost:30301"
+	@echo "  Grafana:  http://localhost:30400"
+	@echo "  Langfuse: http://localhost:30401"
 	@echo "════════════════════════════════════════"
 
 # ─── 상태 확인 ───
 k8s-status:
 	@echo "=== Agent Platform ===" && kubectl get pods,svc -n $(K8S_NS)
 	@echo "" && echo "=== Monitoring ===" && kubectl get pods,svc -n $(MON_NS)
+	@echo "" && echo "=== Langfuse ===" && kubectl get pods,svc -n $(LANGFUSE_NS)
 
 k8s-logs:
 	kubectl logs -n $(K8S_NS) -l app.kubernetes.io/part-of=agent-platform --tail=50 -f
@@ -230,28 +172,29 @@ k8s-test-security:
 # ─── 부하/장애 테스트 ───
 k8s-loadtest:
 	kubectl delete job loadtest -n $(K8S_NS) --ignore-not-found
-	kubectl apply -f deploy/k8s/loadtest-job.yaml
+	kubectl apply -f infra/k8s/loadtest-job.yaml
 	kubectl wait --for=condition=complete job/loadtest -n $(K8S_NS) --timeout=300s || true
 	kubectl logs job/loadtest -n $(K8S_NS)
 
 k8s-chaos:
 	kubectl delete job chaos-test -n $(K8S_NS) --ignore-not-found
-	kubectl apply -f deploy/k8s/loadtest-job.yaml
+	kubectl apply -f infra/k8s/loadtest-job.yaml
 	kubectl wait --for=condition=complete job/chaos-test -n $(K8S_NS) --timeout=180s || true
 	kubectl logs job/chaos-test -n $(K8S_NS)
 
 # ─── 정리 ───
 k8s-down:
 	helm uninstall $(HELM_RELEASE) --namespace $(K8S_NS) || true
-	kubectl delete -f deploy/k8s/redis.yaml --ignore-not-found
+	kubectl delete -f infra/k8s/redis.yaml --ignore-not-found
 	@echo "✓ Agent 제거 (모니터링 유지)"
 
 k8s-clean:
 	helm uninstall $(HELM_RELEASE) --namespace $(K8S_NS) || true
-	kubectl delete -f deploy/k8s/monitoring/ --ignore-not-found
+	kubectl delete -f infra/k8s/monitoring/ --ignore-not-found
 	kubectl delete configmap grafana-dashboards -n $(MON_NS) --ignore-not-found
-	kubectl delete -f deploy/k8s/redis.yaml --ignore-not-found
-	kubectl delete namespace $(K8S_NS) $(MON_NS) --ignore-not-found
+	kubectl delete -f infra/k8s/redis.yaml --ignore-not-found
+	kubectl delete -f infra/k8s/langfuse.yaml --ignore-not-found
+	kubectl delete namespace $(K8S_NS) $(MON_NS) $(LANGFUSE_NS) --ignore-not-found
 	@echo "✓ 전체 정리 완료"
 
 # ─── 로그 조회 (Loki API) ───

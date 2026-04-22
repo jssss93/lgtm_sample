@@ -1,6 +1,6 @@
 """
 멀티에이전트 시스템 통합 테스트
-docker-compose up -d --build 이후 실행:
+K8s 배포 (make k8s-up) 이후 실행:
   python -m pytest tests/test_agents.py -v
 """
 

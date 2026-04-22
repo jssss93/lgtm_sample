@@ -257,8 +257,7 @@ make stats-all  # 한 줄 요약
 
 | 환경 | URL |
 |------|-----|
-| Docker Compose | http://localhost:3000 |
-| K8s (NodePort) | http://localhost:30300 |
+| K8s (NodePort) | http://localhost:30400 |
 | K8s (port-forward) | `make k8s-port-forward` → http://localhost:3000 |
 
 인증 불필요 (Anonymous Admin).
@@ -282,7 +281,7 @@ K8s 배포 시 커스텀 Grafana 이미지(`grafana-custom:local`)에 드릴다�
 | `grafana-lokiexplore-app` | /drilldown → Logs | 로그 탐색 (서비스별, 패턴 분석) |
 | `grafana-metricsdrilldown-app` | /drilldown → Metrics | 메트릭 탐색 (자동 그룹핑) |
 
-폐쇄망 배포: `deploy/k8s/grafana-plugins/*.zip` 파일을 Dockerfile에서 baked-in.
+폐쇄망 배포: `infra/k8s/grafana-plugins/*.zip` 파일을 Dockerfile에서 baked-in.
 
 ### 데이터소스 연동 (Traces ↔ Logs ↔ Metrics)
 
