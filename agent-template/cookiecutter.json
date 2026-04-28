@@ -1,9 +1,0 @@
-{
-  "agent_name": "my-agent",
-  "agent_type": "my_agent",
-  "description": "My custom AI agent",
-  "model": "gpt-4.1-mini",
-  "system_prompt": "You are a helpful AI agent. Respond concisely and accurately.",
-  "port": "8004",
-  "max_response_words": "200"
-}
