@@ -210,6 +210,45 @@ def test_noop_metrics_recorder():
     recorder.record_cache_hit("search")
     recorder.record_cache_miss("search")
     recorder.record_quota_reject("search")
+    recorder.record_quality_score("search", "gpt-4.1-mini", 0.85)
+
+
+# ──────────────────────────── Quality Score 테스트 ───────────────
+def test_compute_quality_score_high():
+    from domain.quality import compute_quality_score as _compute_quality_score
+
+    text = "Azure OpenAI는 GPT-4.1 모델을 API로 제공하는 서비스입니다. REST API 또는 Python SDK로 호출할 수 있습니다."
+    assert _compute_quality_score(text) >= 0.8
+
+
+def test_compute_quality_score_short():
+    from domain.quality import compute_quality_score as _compute_quality_score
+
+    assert _compute_quality_score("모르겠습니다.") < 0.5
+
+
+def test_compute_quality_score_error_keyword():
+    from domain.quality import compute_quality_score as _compute_quality_score
+
+    text = "I cannot provide an answer to that question due to policy restrictions."
+    score = _compute_quality_score(text)
+    assert score < 0.8
+
+
+def test_compute_quality_score_incomplete():
+    from domain.quality import compute_quality_score as _compute_quality_score
+
+    text = "이 기능은 다음과 같이 작동하며 여러 단계를 거쳐서 처리되는데 그 과정에서"
+    score = _compute_quality_score(text)
+    assert score <= 0.8
+
+
+def test_compute_quality_score_floor():
+    from domain.quality import compute_quality_score as _compute_quality_score
+
+    assert _compute_quality_score("") == 0.0          # 빈 응답 → 즉시 0
+    assert _compute_quality_score("?") < 0.8           # 1자 → 낮은 점수
+    assert 0.0 <= _compute_quality_score("?") <= 1.0  # 범위 보장
 
 
 # ──────────────────────────── HTTP 모델 테스트 ───────────────────
@@ -274,7 +313,9 @@ def test_config_agent_profiles():
     assert "summarizer" in AGENT_PROFILES
     assert "coder" in AGENT_PROFILES
 
-    for name, profile in AGENT_PROFILES.items():
+    # scorer는 system_prompt 없는 특수 프로필 (judge 호출용)
+    agent_profiles = {k: v for k, v in AGENT_PROFILES.items() if k != "scorer"}
+    for name, profile in agent_profiles.items():
         assert "deployment" in profile
         assert "system_prompt" in profile
         assert len(profile["system_prompt"]) > 0
@@ -307,3 +348,217 @@ def test_memory_cache_implements_port():
 
     backend = MemoryCacheBackend(ttl_seconds=300, max_size=100)
     assert isinstance(backend, CacheBackend)
+
+
+# ──────────────────────────── PromptResolution 값 객체 테스트 ────
+def test_prompt_resolution_immutable():
+    from domain.prompt import PromptResolution
+    import pytest
+
+    res = PromptResolution(
+        system_prompt="test", version="1.0", variant="active",
+        source="yaml", content_hash="abcd1234",
+    )
+    assert res.version == "1.0"
+    assert res.source == "yaml"
+    with pytest.raises((AttributeError, TypeError)):
+        res.version = "2.0"  # type: ignore[misc]
+
+
+def test_prompt_resolution_fields():
+    from domain.prompt import PromptResolution
+
+    res = PromptResolution(
+        system_prompt="You are a search agent.", version="1.1",
+        variant="ab-1.1", source="yaml", content_hash="12345678",
+    )
+    assert res.system_prompt == "You are a search agent."
+    assert res.variant == "ab-1.1"
+    assert res.content_hash == "12345678"
+
+
+# ──────────────────────────── YamlPromptManager 테스트 ───────────
+def test_prompt_manager_load_yaml(tmp_path):
+    """YAML 파일에서 프롬프트 로드 및 resolve 동작 확인."""
+    import yaml
+    from infrastructure.prompt_manager import YamlPromptManager
+    from infrastructure.metrics_otel import NoOpMetricsRecorder
+
+    # YAML 파일 생성
+    prompt_data = {
+        "versions": {
+            "1.0": {"system_prompt": "You are a search agent v1."},
+            "1.1": {"system_prompt": "You are an advanced search agent v1.1."},
+        },
+        "active": "1.1",
+        "ab_test": {"enabled": False, "variants": []},
+    }
+    (tmp_path / "search.yaml").write_text(yaml.dump(prompt_data))
+
+    manager = YamlPromptManager(
+        prompts_dir=str(tmp_path),
+        fallback_profiles={"search": {"system_prompt": "fallback"}},
+        metrics=NoOpMetricsRecorder(),
+    )
+    res = manager.resolve("search")
+    assert res.version == "1.1"
+    assert "advanced search" in res.system_prompt
+    assert res.source == "yaml"
+    assert res.variant == "active"
+
+
+def test_prompt_manager_fallback():
+    """YAML 파일 없을 때 fallback 프로필 사용 확인."""
+    from infrastructure.prompt_manager import YamlPromptManager
+    from infrastructure.metrics_otel import NoOpMetricsRecorder
+
+    manager = YamlPromptManager(
+        prompts_dir="/nonexistent/path",
+        fallback_profiles={"search": {"system_prompt": "fallback prompt"}},
+        metrics=NoOpMetricsRecorder(),
+    )
+    res = manager.resolve("search")
+    assert res.version == "fallback"
+    assert res.source == "fallback"
+    assert res.system_prompt == "fallback prompt"
+
+
+def test_prompt_manager_ab_sticky(tmp_path):
+    """A/B 테스트 sticky assignment: 동일 subject_id → 동일 variant 선택."""
+    import yaml
+    from infrastructure.prompt_manager import YamlPromptManager
+    from infrastructure.metrics_otel import NoOpMetricsRecorder
+
+    prompt_data = {
+        "versions": {
+            "1.0": {"system_prompt": "v1.0"},
+            "1.1": {"system_prompt": "v1.1"},
+        },
+        "active": "1.0",
+        "ab_test": {
+            "enabled": True,
+            "variants": [
+                {"version": "1.0", "weight": 50},
+                {"version": "1.1", "weight": 50},
+            ],
+        },
+    }
+    (tmp_path / "search.yaml").write_text(yaml.dump(prompt_data))
+
+    manager = YamlPromptManager(
+        prompts_dir=str(tmp_path),
+        fallback_profiles={},
+        metrics=NoOpMetricsRecorder(),
+    )
+    # 동일 subject_id는 항상 같은 결과
+    res1 = manager.resolve("search", subject_id="user-42")
+    res2 = manager.resolve("search", subject_id="user-42")
+    assert res1.version == res2.version
+    assert res1.variant == res2.variant
+    assert res1.variant.startswith("ab-")
+
+
+def test_prompt_manager_invalid_yaml_keeps_previous(tmp_path):
+    """잘못된 YAML 로드 시 이전 설정 유지."""
+    import yaml
+    from infrastructure.prompt_manager import YamlPromptManager
+    from infrastructure.metrics_otel import NoOpMetricsRecorder
+
+    valid_data = {
+        "versions": {"1.0": {"system_prompt": "valid prompt"}},
+        "active": "1.0",
+    }
+    yaml_path = tmp_path / "search.yaml"
+    yaml_path.write_text(yaml.dump(valid_data))
+
+    manager = YamlPromptManager(
+        prompts_dir=str(tmp_path),
+        fallback_profiles={},
+        metrics=NoOpMetricsRecorder(),
+    )
+    assert manager.resolve("search").system_prompt == "valid prompt"
+
+    # 잘못된 YAML 작성
+    yaml_path.write_text("not: valid: yaml: [")
+    from pathlib import Path
+    manager._load_file(Path(yaml_path))
+
+    # 이전 설정이 유지되어야 함
+    assert manager.resolve("search").system_prompt == "valid prompt"
+
+
+def test_prompt_manager_get_info(tmp_path):
+    """get_info() 메타데이터 반환 확인."""
+    import yaml
+    from infrastructure.prompt_manager import YamlPromptManager
+    from infrastructure.metrics_otel import NoOpMetricsRecorder
+
+    prompt_data = {
+        "versions": {"1.0": {"system_prompt": "test"}, "1.1": {"system_prompt": "test2"}},
+        "active": "1.0",
+        "ab_test": {"enabled": False},
+    }
+    (tmp_path / "search.yaml").write_text(yaml.dump(prompt_data))
+
+    manager = YamlPromptManager(
+        prompts_dir=str(tmp_path),
+        fallback_profiles={"coder": {"system_prompt": "coder fallback"}},
+        metrics=NoOpMetricsRecorder(),
+    )
+    info = manager.get_info()
+    assert "search" in info
+    assert info["search"]["active_version"] == "1.0"
+    assert "1.0" in info["search"]["available_versions"]
+    assert "1.1" in info["search"]["available_versions"]
+    assert info["search"]["source"] == "yaml"
+    # fallback 프로필도 표시
+    assert "coder" in info
+    assert info["coder"]["source"] == "fallback"
+
+
+# ──────────────────────────── 캐시 키 prompt_version 테스트 ──────
+def test_cache_key_with_prompt_version():
+    from infrastructure.cache_memory import _cache_key
+
+    key_no_ver = _cache_key("gpt-4.1", "hello")
+    key_v1 = _cache_key("gpt-4.1", "hello", "1.0")
+    key_v2 = _cache_key("gpt-4.1", "hello", "1.1")
+
+    # 버전이 다르면 캐시 키도 달라야 함
+    assert key_no_ver != key_v1
+    assert key_v1 != key_v2
+    # 동일 버전은 동일 키
+    assert key_v1 == _cache_key("gpt-4.1", "hello", "1.0")
+
+
+def test_cache_prompt_version_isolation():
+    """프롬프트 버전이 다른 캐시 항목은 격리되어야 함."""
+    from infrastructure.cache_memory import MemoryCacheBackend
+
+    async def _test():
+        backend = MemoryCacheBackend(ttl_seconds=300, max_size=100)
+
+        await backend.set("gpt-4.1", "hello", "answer-v1", {}, prompt_version="1.0")
+        await backend.set("gpt-4.1", "hello", "answer-v2", {}, prompt_version="1.1")
+
+        r1 = await backend.get("gpt-4.1", "hello", prompt_version="1.0")
+        r2 = await backend.get("gpt-4.1", "hello", prompt_version="1.1")
+        r_none = await backend.get("gpt-4.1", "hello", prompt_version="2.0")
+
+        assert r1 is not None and r1[0] == "answer-v1"
+        assert r2 is not None and r2[0] == "answer-v2"
+        assert r_none is None
+
+    asyncio.run(_test())
+
+
+# ──────────────────────────── NoOp 메트릭 확장 테스트 ────────────
+def test_noop_metrics_prompt_methods():
+    from infrastructure.metrics_otel import NoOpMetricsRecorder
+
+    recorder = NoOpMetricsRecorder()
+    # 새 메서드 호출 시 예외 없이 통과해야 함
+    recorder.record_prompt_reload("search", "1.0")
+    recorder.record_prompt_selection("search", "1.0", "active")
+    recorder.record_quality_score("search", "gpt-4.1-mini", 0.85, prompt_version="1.0")
+    recorder.record_judge_scores("search", "gpt-4.1", 8.0, 7.5, 9.0, 8.5, prompt_version="1.1")

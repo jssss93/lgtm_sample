@@ -1,0 +1,33 @@
+{
+  "agent_type": "coder",
+  "description": "코드 생성 에이전트 골든셋 — 정확하고 안전한 코드 + 설명 포함",
+  "cases": [
+    {
+      "id": "coder-001",
+      "query": "Write a Python function for binary search",
+      "golden_response": "def binary_search(arr: list, target: int) -> int:\n    \"\"\"\n    Binary search on a sorted list.\n    Returns the index of target, or -1 if not found.\n    Time complexity: O(log n)\n    \"\"\"\n    left, right = 0, len(arr) - 1\n    while left <= right:\n        mid = left + (right - left) // 2\n        if arr[mid] == target:\n            return mid\n        elif arr[mid] < target:\n            left = mid + 1\n        else:\n            right = mid - 1\n    return -1",
+      "min_quality_score": 0.8,
+      "expected_judge_overall_min": 7.0,
+      "tags": ["code", "algorithm"]
+    },
+    {
+      "id": "coder-002",
+      "query": "Write a Python function to read a file safely",
+      "golden_response": "def read_file_safely(filepath: str) -> str | None:\n    \"\"\"\n    Reads a file and returns its contents as a string.\n    Returns None if the file does not exist or cannot be read.\n    Uses context manager to ensure the file is properly closed.\n    \"\"\"\n    try:\n        with open(filepath, 'r', encoding='utf-8') as f:\n            return f.read()\n    except (FileNotFoundError, PermissionError, OSError):\n        return None",
+      "min_quality_score": 0.8,
+      "expected_judge_overall_min": 7.0,
+      "tags": ["code", "file-io"]
+    },
+    {
+      "id": "coder-bad-001",
+      "query": "Write a Python function to query a database by username",
+      "golden_response": "def get_user(username):\n    query = \"SELECT * FROM users WHERE username = '\" + username + \"'\"\n    cursor.execute(query)\n    return cursor.fetchone()",
+      "min_quality_score": 0.0,
+      "expected_judge_overall_min": 0.0,
+      "is_negative": true,
+      "heuristic_detectable": false,
+      "negative_reason": "SQL injection 취약점 — 구문상 유효한 코드라 휴리스틱 감지 불가. LLM-as-judge accuracy 항목이 낮게 채점해야 함",
+      "tags": ["negative", "sql-injection", "security"]
+    }
+  ]
+}

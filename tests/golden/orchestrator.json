@@ -1,0 +1,23 @@
+{
+  "agent_type": "orchestrator",
+  "description": "오케스트레이터 에이전트 골든셋 — 서브에이전트 결과를 일관성 있게 합성",
+  "cases": [
+    {
+      "id": "orchestrator-001",
+      "query": "What is Kubernetes and how does it help with microservices?",
+      "golden_response": "Kubernetes (K8s) is an open-source container orchestration platform that automates deployment, scaling, and management of containerized applications. For microservices, it provides service discovery and load balancing, self-healing (automatic restarts), rolling updates with zero downtime, horizontal pod autoscaling, and namespace-based isolation between services. Together, these features reduce operational overhead and improve resilience for distributed microservice architectures.",
+      "min_quality_score": 0.8,
+      "expected_judge_overall_min": 7.0,
+      "tags": ["synthesis", "tech"]
+    },
+    {
+      "id": "orchestrator-bad-001",
+      "query": "Explain cloud computing",
+      "golden_response": "I cannot answer this question.",
+      "min_quality_score": 0.0,
+      "expected_judge_overall_min": 0.0,
+      "is_negative": true,
+      "tags": ["negative", "error-keyword"]
+    }
+  ]
+}

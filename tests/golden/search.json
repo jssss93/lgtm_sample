@@ -1,0 +1,39 @@
+{
+  "agent_type": "search",
+  "description": "팩트 검색 에이전트 골든셋 — 사실 기반 질문에 명확하고 간결한 답변",
+  "cases": [
+    {
+      "id": "search-001",
+      "query": "What is Kubernetes?",
+      "golden_response": "Kubernetes (K8s) is an open-source container orchestration platform developed by Google and donated to the CNCF in 2014. It automates the deployment, scaling, and management of containerized applications. Key concepts include Pods (smallest deployable unit), Services (network abstraction), Deployments (desired state management), and Namespaces (logical isolation). It runs across on-premises and cloud environments.",
+      "min_quality_score": 0.8,
+      "expected_judge_overall_min": 7.0,
+      "tags": ["factual", "tech"]
+    },
+    {
+      "id": "search-002",
+      "query": "What is OpenTelemetry?",
+      "golden_response": "OpenTelemetry (OTel) is a CNCF project providing a vendor-neutral observability framework. It standardizes the collection of traces, metrics, and logs through a unified SDK and specification. Applications instrument once using OTel APIs, then export to any compatible backend (Prometheus, Jaeger, Grafana Tempo, etc.) via the OpenTelemetry Protocol (OTLP). It is the successor to OpenTracing and OpenCensus.",
+      "min_quality_score": 0.8,
+      "expected_judge_overall_min": 7.0,
+      "tags": ["factual", "observability"]
+    },
+    {
+      "id": "search-003",
+      "query": "What is the difference between SQL and NoSQL databases?",
+      "golden_response": "SQL databases use structured schemas and relational tables with ACID transactions (e.g., PostgreSQL, MySQL). NoSQL databases sacrifice strict schema and some ACID guarantees for horizontal scalability and flexible data models — including key-value (Redis), document (MongoDB), column-family (Cassandra), and graph (Neo4j) types. SQL fits complex queries and strong consistency needs; NoSQL fits high-write, large-scale, or schema-flexible workloads.",
+      "min_quality_score": 0.8,
+      "expected_judge_overall_min": 7.0,
+      "tags": ["factual", "database"]
+    },
+    {
+      "id": "search-bad-001",
+      "query": "What is the speed of light?",
+      "golden_response": "I don't know.",
+      "min_quality_score": 0.0,
+      "expected_judge_overall_min": 0.0,
+      "is_negative": true,
+      "tags": ["negative", "error-keyword"]
+    }
+  ]
+}

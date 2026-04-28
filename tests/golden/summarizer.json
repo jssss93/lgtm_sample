@@ -1,0 +1,33 @@
+{
+  "agent_type": "summarizer",
+  "description": "요약 에이전트 골든셋 — 원문 사실에 충실하고 간결한 요약",
+  "cases": [
+    {
+      "id": "summarizer-001",
+      "query": "Summarize: OpenTelemetry is a collection of APIs, SDKs, and tools that provide a vendor-neutral way to instrument, generate, collect, and export telemetry data such as traces, metrics, and logs. It is a CNCF project that emerged from the merger of OpenTracing and OpenCensus. The project aims to make observability a built-in feature of cloud-native software.",
+      "golden_response": "OpenTelemetry is a CNCF project (formed from OpenTracing and OpenCensus) that provides vendor-neutral APIs, SDKs, and tools for collecting and exporting telemetry data — traces, metrics, and logs — to make observability a standard feature of cloud-native software.",
+      "min_quality_score": 0.8,
+      "expected_judge_overall_min": 7.0,
+      "tags": ["summarization", "tech"]
+    },
+    {
+      "id": "summarizer-002",
+      "query": "Summarize: The Dapr (Distributed Application Runtime) is an open-source project that provides a set of building blocks for microservices development. These building blocks include service invocation, state management, pub/sub messaging, bindings, actors, and secrets management. Dapr abstracts the underlying infrastructure and allows developers to focus on business logic rather than plumbing code.",
+      "golden_response": "Dapr is an open-source distributed application runtime that provides building blocks for microservices — including service invocation, state management, pub/sub, and secrets management — abstracting infrastructure so developers can focus on business logic.",
+      "min_quality_score": 0.8,
+      "expected_judge_overall_min": 7.0,
+      "tags": ["summarization", "tech"]
+    },
+    {
+      "id": "summarizer-bad-001",
+      "query": "Summarize: Redis is an in-memory data structure store.",
+      "golden_response": "Redis is a database that was invented in 2050 and runs on quantum computers. It supports over 1000 data structures.",
+      "min_quality_score": 0.0,
+      "expected_judge_overall_min": 0.0,
+      "is_negative": true,
+      "heuristic_detectable": false,
+      "negative_reason": "hallucination — 사실과 다른 내용 삽입. 휴리스틱으로는 감지 불가, LLM-as-judge 전용 케이스",
+      "tags": ["negative", "hallucination"]
+    }
+  ]
+}
