@@ -10,11 +10,12 @@ metadata:
 spec:
   selector:
     app.kubernetes.io/name: agent-{{ .name }}
+  type: {{ dig "service" "type" "ClusterIP" . }}
   ports:
   - port: 8000
     targetPort: 8000
     name: http
-  {{- if .isOrchestrator }}
-  type: ClusterIP
-  {{- end }}
+    {{- if and (eq (dig "service" "type" "ClusterIP" .) "NodePort") (dig "service" "nodePort" 0 .) }}
+    nodePort: {{ dig "service" "nodePort" 0 . }}
+    {{- end }}
 {{- end }}

@@ -1,4 +1,4 @@
-# deploy/k8s/ — 로컬 K8s 인프라 매니페스트
+# infra/k8s/ — 로컬 K8s 인프라 매니페스트
 
 Helm Chart에 포함되지 않는 인프라 리소스. `kubectl apply -f` 또는 Makefile로 배포.
 
@@ -32,7 +32,7 @@ Helm Chart에 포함되지 않는 인프라 리소스. `kubectl apply -f` 또는
 | `grafana-metricsdrilldown-app.zip` | Metrics Drilldown 원본 zip (4.0MB) |
 | `plugins/` | zip 추출본 3개 (git 관리, Docker COPY 대상) |
 
-빌드: `docker build -t grafana-custom:local ./deploy/k8s/grafana-plugins`
+빌드: `docker build -t grafana-custom:local ./infra/k8s/grafana-plugins`
 
 > `GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS`에 3개 플러그인 명시됨 (`grafana.yaml`)
 
@@ -49,7 +49,7 @@ Helm Chart에 포함되지 않는 인프라 리소스. `kubectl apply -f` 또는
 
 ## 배포 순서 (Makefile k8s-monitoring)
 
-1. `kubectl apply -f deploy/k8s/monitoring/` (전체 적용)
+1. `kubectl apply -f infra/k8s/monitoring/` (전체 적용)
 2. Tempo, Loki, Prometheus Ready 대기
 3. OTel Collector `rollout restart` (DNS 캐시 방지)
 4. OTel Collector Ready 대기

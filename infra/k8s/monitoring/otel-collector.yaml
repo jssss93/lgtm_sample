@@ -34,9 +34,9 @@ data:
         tls:
           insecure: true
         keepalive:
-          time: 10s
-          timeout: 5s
-          permit_without_stream: true
+          time: 60s
+          timeout: 20s
+          permit_without_stream: false
         retry_on_failure:
           enabled: true
           initial_interval: 5s

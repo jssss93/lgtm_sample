@@ -10,6 +10,9 @@ agents:
     model: gpt-4.1
     replicas: 1
     port: 8000
+    service:
+      type: NodePort
+      nodePort: 30800
     resources:
       requests:
         memory: 256Mi
@@ -110,7 +113,7 @@ otel:
 
 langfuse:
   enabled: true
-  host: "http://langfuse.monitoring:3000"
+  host: "http://langfuse.langfuse:3000"
   secretRef: "langfuse-secret"
 
 keda:
@@ -136,3 +139,11 @@ topologySpreadConstraints:
 
 gracefulShutdown:
   periodSeconds: 15
+
+# ── 외부 접근 포트 참조 (NodePort) ───────────────────────────
+# 에이전트: Helm chart (agent-service.yaml)가 관리
+# 모니터링/Langfuse: infra/k8s/ 매니페스트가 관리
+externalPorts:
+  orchestrator: 30800   # agent-service.yaml (service.nodePort)
+  grafana: 30300        # infra/k8s/monitoring/grafana.yaml
+  langfuse: 30301       # infra/k8s/langfuse.yaml

@@ -1,4 +1,4 @@
-# deploy/helm/ — Kubernetes Helm Chart
+# infra/helm/ — Kubernetes Helm Chart
 
 agent-platform Helm Chart. 에이전트 4개 + Dapr + 보안/HA + KEDA 오토스케일 설정.
 

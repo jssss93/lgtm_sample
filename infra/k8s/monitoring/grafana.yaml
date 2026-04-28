@@ -114,10 +114,27 @@ spec:
           value: "true"
         - name: GF_AUTH_ANONYMOUS_ORG_ROLE
           value: "Admin"
+        # 로그인 화면·내장 로그인 비활성화 (익명만, 로컬 LGTM용)
+        - name: GF_AUTH_DISABLE_LOGIN
+          value: "true"
         - name: GF_AUTH_DISABLE_LOGIN_FORM
           value: "true"
+        - name: GF_AUTH_BASIC_ENABLED
+          value: "false"
+        - name: GF_AUTH_DISABLE_SIGNOUT_MENU
+          value: "true"
+        # NodePort로 접속 시 Host(:30300)와 일치해야 익명 로그인·API가 동작함.
+        # localhost→IPv6(::1) 우선 환경에서 root_url 미설정 시 /login 으로 302 되는 문제 방지.
+        - name: GF_SERVER_ROOT_URL
+          value: "%(protocol)s://%(domain)s:%(http_port)s/"
+        - name: GF_AUTH_ANONYMOUS_ORG_NAME
+          value: "Main Org."
         - name: GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS
           value: "grafana-exploretraces-app,grafana-lokiexplore-app,grafana-metricsdrilldown-app"
+        - name: GF_DATABASE_WAL
+          value: "true"
+        - name: GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH
+          value: "/etc/grafana/provisioning/dashboards/json/multi-agent-overview.json"
         volumeMounts:
         - name: datasources
           mountPath: /etc/grafana/provisioning/datasources
@@ -129,11 +146,11 @@ spec:
           mountPath: /var/lib/grafana
         resources:
           requests:
-            memory: 128Mi
+            memory: 256Mi
             cpu: 100m
           limits:
-            memory: 256Mi
-            cpu: 200m
+            memory: 512Mi
+            cpu: 300m
       volumes:
       - name: datasources
         configMap:
@@ -156,9 +173,14 @@ metadata:
   namespace: monitoring
 spec:
   type: NodePort
+  # 30300은 로컬 Docker Desktop/OrbStack 프록시와 충돌할 수 있어 30400 사용
+  # localhost 우선 경로를 안정화하기 위해 IPv4 단일 스택으로 노출
+  ipFamilyPolicy: SingleStack
+  ipFamilies:
+    - IPv4
   selector:
     app: grafana
   ports:
   - port: 3000
     targetPort: 3000
-    nodePort: 30300
+    nodePort: 30400

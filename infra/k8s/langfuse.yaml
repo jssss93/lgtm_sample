@@ -1,10 +1,10 @@
 # ─── Langfuse v3 — PostgreSQL + ClickHouse + Langfuse ────────────────────────
-# Langfuse UI: http://localhost:30301  (초기 계정: 첫 접속 시 회원가입)
+# Langfuse UI: http://localhost:30401
 # API Keys 발급 순서:
-#   1. http://localhost:30301 접속 → 계정 생성 → 프로젝트 생성
+#   1. http://localhost:30401 접속 → 계정 생성 → 프로젝트 생성
 #   2. Settings → API Keys → Create Key
 #   3. 발급된 public-key / secret-key 를 langfuse-secret 에 업데이트
-#      kubectl create secret generic langfuse-secret -n monitoring \
+#      kubectl create secret generic langfuse-secret -n langfuse \
 #        --from-literal=public-key=pk-lf-xxxx \
 #        --from-literal=secret-key=sk-lf-xxxx \
 #        --from-literal=nextauth-secret=<32자이상-랜덤문자열> \
@@ -14,10 +14,18 @@
 
 ---
 apiVersion: v1
+kind: Namespace
+metadata:
+  name: langfuse
+  labels:
+    app.kubernetes.io/part-of: agent-platform
+
+---
+apiVersion: v1
 kind: Secret
 metadata:
   name: langfuse-secret
-  namespace: monitoring
+  namespace: langfuse
 type: Opaque
 stringData:
   nextauth-secret: "langfuse-nextauth-secret-local-dev-32chars!!"
@@ -32,7 +40,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: langfuse-postgres-secret
-  namespace: monitoring
+  namespace: langfuse
 type: Opaque
 stringData:
   password: "langfuse-pg-pass"
@@ -42,7 +50,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: langfuse-postgres
-  namespace: monitoring
+  namespace: langfuse
 spec:
   replicas: 1
   selector:
@@ -105,7 +113,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: langfuse-postgres
-  namespace: monitoring
+  namespace: langfuse
 spec:
   selector:
     app: langfuse-postgres
@@ -119,7 +127,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: langfuse-clickhouse
-  namespace: monitoring
+  namespace: langfuse
 spec:
   replicas: 1
   selector:
@@ -189,7 +197,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: langfuse-clickhouse
-  namespace: monitoring
+  namespace: langfuse
 spec:
   selector:
     app: langfuse-clickhouse
@@ -207,7 +215,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: langfuse-minio
-  namespace: monitoring
+  namespace: langfuse
 spec:
   replicas: 1
   selector:
@@ -268,7 +276,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: langfuse-minio
-  namespace: monitoring
+  namespace: langfuse
 spec:
   selector:
     app: langfuse-minio
@@ -286,7 +294,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: langfuse
-  namespace: monitoring
+  namespace: langfuse
 spec:
   replicas: 1
   selector:
@@ -332,7 +340,7 @@ spec:
         - name: CLICKHOUSE_PASSWORD
           value: "langfuse-ch-pass"
         - name: NEXTAUTH_URL
-          value: "http://localhost:30301"
+          value: "http://localhost:30401"
         - name: NEXTAUTH_SECRET
           valueFrom:
             secretKeyRef:
@@ -433,7 +441,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: langfuse
-  namespace: monitoring
+  namespace: langfuse
 spec:
   type: NodePort
   selector:
@@ -441,7 +449,7 @@ spec:
   ports:
   - port: 3000
     targetPort: 3000
-    nodePort: 30301
+    nodePort: 30401
 
 ---
 # ─── Langfuse Worker (이벤트 큐 → ClickHouse 처리) ───────────────────────────
@@ -449,7 +457,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: langfuse-worker
-  namespace: monitoring
+  namespace: langfuse
 spec:
   replicas: 1
   selector:

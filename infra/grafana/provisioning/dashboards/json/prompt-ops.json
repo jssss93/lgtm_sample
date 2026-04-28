@@ -1,0 +1,397 @@
+{
+  "uid": "prompt-ops",
+  "title": "Prompt Operations",
+  "tags": ["lgtm", "prompt", "agent", "promptops"],
+  "description": "프롬프트 버전 관리, A/B 테스트, Hot-Reload 모니터링 대시보드.",
+  "timezone": "browser",
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "schemaVersion": 39,
+  "templating": {
+    "list": [
+      {
+        "name": "agent_type",
+        "label": "Agent",
+        "type": "custom",
+        "query": "orchestrator,search,summarizer,coder",
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": { "selected": true, "text": ["All"], "value": ["$__all"] },
+        "options": [],
+        "hide": 0,
+        "skipUrlSync": false
+      },
+      {
+        "name": "prompt_version",
+        "label": "Prompt Version",
+        "type": "custom",
+        "query": "1.0,1.1,fallback",
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": { "selected": true, "text": ["All"], "value": ["$__all"] },
+        "options": [],
+        "hide": 0,
+        "skipUrlSync": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "── Prompt Status ──",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "id": 2,
+      "title": "Total Prompt Selections",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(prompt_selection_count_total{agent_type=~\"$agent_type\"})",
+          "legendFormat": "Selections"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [{ "color": "blue", "value": null }] }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "textMode": "auto" }
+    },
+    {
+      "id": 3,
+      "title": "Total Prompt Reloads",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(prompt_reload_count_total{agent_type=~\"$agent_type\"})",
+          "legendFormat": "Reloads"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [{ "color": "orange", "value": null }] }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "textMode": "auto" }
+    },
+    {
+      "id": 4,
+      "title": "Active Prompt Versions",
+      "description": "에이전트별 현재 사용 중인 프롬프트 버전 분포",
+      "type": "table",
+      "gridPos": { "h": 4, "w": 12, "x": 12, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (agent_type, prompt_version) (prompt_selection_count_total{agent_type=~\"$agent_type\"})",
+          "legendFormat": "{{agent_type}} — v{{prompt_version}}",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Time" }, "properties": [{ "id": "custom.hidden", "value": true }] },
+          { "matcher": { "id": "byName", "options": "Value" }, "properties": [{ "id": "displayName", "value": "Total Selections" }] },
+          { "matcher": { "id": "byName", "options": "agent_type" }, "properties": [{ "id": "displayName", "value": "Agent" }] },
+          { "matcher": { "id": "byName", "options": "prompt_version" }, "properties": [{ "id": "displayName", "value": "Version" }] }
+        ]
+      },
+      "options": { "showHeader": true, "footer": { "enablePagination": false } },
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "__name__": true, "job": true, "instance": true, "prompt_variant": true } } }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "── Version Distribution ──",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "collapsed": false
+    },
+    {
+      "id": 11,
+      "title": "Prompt Version Distribution (Pie)",
+      "description": "프롬프트 버전별 선택 비율",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (prompt_version, agent_type) (prompt_selection_count_total{agent_type=~\"$agent_type\"})",
+          "legendFormat": "{{agent_type}} v{{prompt_version}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" } }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "pieType": "donut",
+        "legend": { "displayMode": "table", "placement": "right", "values": ["value", "percent"] },
+        "tooltip": { "mode": "single" }
+      }
+    },
+    {
+      "id": 12,
+      "title": "Prompt Selection Rate by Version",
+      "description": "시간대별 프롬프트 버전 선택 비율 (RPS)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (agent_type, prompt_version) (rate(prompt_selection_count_total{agent_type=~\"$agent_type\"}[$__rate_interval]))",
+          "legendFormat": "{{agent_type}} v{{prompt_version}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 20, "stacking": { "mode": "normal" } },
+          "unit": "reqps"
+        }
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 13,
+      "title": "A/B Variant Selection by Agent",
+      "description": "에이전트별 A/B 변이 선택 분포",
+      "type": "bargauge",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (agent_type, prompt_variant) (prompt_selection_count_total{agent_type=~\"$agent_type\", prompt_variant=~\"ab-.*\"})",
+          "legendFormat": "{{agent_type}} — {{prompt_variant}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short",
+          "thresholds": { "steps": [{ "color": "green", "value": null }] }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true }
+    },
+    {
+      "id": 20,
+      "title": "── Quality by Prompt Version ──",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 20 },
+      "collapsed": false
+    },
+    {
+      "id": 21,
+      "title": "Avg Quality Score by Prompt Version",
+      "description": "프롬프트 버전별 평균 품질 점수 비교",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 21 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (prompt_version, agent_type) (rate(llm_quality_score_sum{agent_type=~\"$agent_type\", prompt_version=~\"$prompt_version\"}[$__rate_interval])) / sum by (prompt_version, agent_type) (rate(llm_quality_score_count{agent_type=~\"$agent_type\", prompt_version=~\"$prompt_version\"}[$__rate_interval]))",
+          "legendFormat": "{{agent_type}} v{{prompt_version}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "spanNulls": true },
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "green", "value": 0.8 }
+            ]
+          },
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 22,
+      "title": "Quality Score Distribution by Version",
+      "description": "프롬프트 버전별 품질 점수 분포 (히스토그램)",
+      "type": "histogram",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 21 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (le, prompt_version) (rate(llm_quality_score_bucket{agent_type=~\"$agent_type\", prompt_version=~\"$prompt_version\"}[$__rate_interval]))",
+          "legendFormat": "v{{prompt_version}}",
+          "format": "heatmap"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "percentunit"
+        }
+      },
+      "options": { "bucketSize": 0.1, "combine": false, "fillOpacity": 80, "gradientMode": "scheme", "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "id": 23,
+      "title": "Judge Overall Score by Prompt Version",
+      "description": "LLM-as-Judge 전체 점수 버전별 비교",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 29 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (prompt_version, agent_type) (rate(llm_judge_overall_sum{agent_type=~\"$agent_type\", prompt_version=~\"$prompt_version\"}[$__rate_interval])) / sum by (prompt_version, agent_type) (rate(llm_judge_overall_count{agent_type=~\"$agent_type\", prompt_version=~\"$prompt_version\"}[$__rate_interval]))",
+          "legendFormat": "{{agent_type}} v{{prompt_version}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "spanNulls": true },
+          "unit": "short",
+          "min": 0,
+          "max": 10,
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 24,
+      "title": "Low Quality Rate by Version (< 0.5)",
+      "description": "버전별 저품질 응답 비율",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 29 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (prompt_version, agent_type) (rate(llm_quality_score_bucket{le=\"0.5\", agent_type=~\"$agent_type\", prompt_version=~\"$prompt_version\"}[$__rate_interval])) / sum by (prompt_version, agent_type) (rate(llm_quality_score_count{agent_type=~\"$agent_type\", prompt_version=~\"$prompt_version\"}[$__rate_interval]))",
+          "legendFormat": "{{agent_type}} v{{prompt_version}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "spanNulls": true },
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.1 },
+              { "color": "red", "value": 0.3 }
+            ]
+          },
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 30,
+      "title": "── Prompt Reload Events ──",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 37 },
+      "collapsed": false
+    },
+    {
+      "id": 31,
+      "title": "Prompt Reload Timeline",
+      "description": "프롬프트 파일 리로드 이벤트 시계열",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 38 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (agent_type, prompt_version) (increase(prompt_reload_count_total{agent_type=~\"$agent_type\"}[$__rate_interval]))",
+          "legendFormat": "{{agent_type}} → v{{prompt_version}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "bars", "fillOpacity": 80, "stacking": { "mode": "normal" } },
+          "unit": "short",
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 32,
+      "title": "Prompt Reload Logs",
+      "description": "프롬프트 리로드/변경 관련 로그 (Loki)",
+      "type": "logs",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 38 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "{service_name=~\"agent-.*\"} |~ \"[Pp]rompt (loaded|reloaded|hot-reloaded|deleted|watcher)\"",
+          "legendFormat": ""
+        }
+      ],
+      "options": { "showTime": true, "showLabels": true, "showCommonLabels": false, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true }
+    },
+    {
+      "id": 33,
+      "title": "Cumulative Reloads by Agent",
+      "description": "에이전트별 누적 리로드 횟수",
+      "type": "bargauge",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 44 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (agent_type) (prompt_reload_count_total{agent_type=~\"$agent_type\"})",
+          "legendFormat": "{{agent_type}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 20 }
+            ]
+          }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true }
+    },
+    {
+      "id": 34,
+      "title": "Prompt Version Change Log (Loki)",
+      "description": "프롬프트 버전 변경 상세 로그",
+      "type": "logs",
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 46 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "{service_name=~\"agent-.*\"} |~ \"(old_version|new_version|prompt_version)\"",
+          "legendFormat": ""
+        }
+      ],
+      "options": { "showTime": true, "showLabels": true, "showCommonLabels": false, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true }
+    }
+  ]
+}
