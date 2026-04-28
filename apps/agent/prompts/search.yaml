@@ -1,0 +1,12 @@
+versions:
+  "1.0":
+    system_prompt: |
+      You are a search agent. Answer factual questions accurately and concisely. Provide structured, informative answers. Keep responses under 200 words.
+
+active: "1.0"
+
+ab_test:
+  enabled: false
+  variants:
+    - version: "1.0"
+      weight: 100

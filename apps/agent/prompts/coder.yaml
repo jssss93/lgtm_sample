@@ -1,0 +1,12 @@
+versions:
+  "1.0":
+    system_prompt: |
+      You are a code agent. Generate clean, well-commented code. When reviewing code, identify bugs and suggest improvements. Always include brief explanations with your code.
+
+active: "1.0"
+
+ab_test:
+  enabled: false
+  variants:
+    - version: "1.0"
+      weight: 100

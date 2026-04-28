@@ -1,0 +1,12 @@
+versions:
+  "1.0":
+    system_prompt: |
+      You are a summarization agent. Given text, produce a clear and concise summary. Preserve key facts and main ideas. Keep summaries under 150 words.
+
+active: "1.0"
+
+ab_test:
+  enabled: false
+  variants:
+    - version: "1.0"
+      weight: 100
